@@ -114,6 +114,37 @@ class JevMappingTest(unittest.TestCase):
         self.assertEqual(r["ask"], "The session is done or says that nothing is needed from the user")
 
 
+class KeyTest(unittest.TestCase):
+    """A TypeSafe key goes to TypeSafe; an OpenRouter key to OpenRouter."""
+
+    def key(self, env, file=""):
+        import os
+        import tempfile
+        from unittest import mock
+        with tempfile.NamedTemporaryFile("w", suffix=".credentials") as f:
+            f.write(file)
+            f.flush()
+            clean = {k: v for k, v in os.environ.items()
+                     if k not in ("TYPESAFE_API_KEY", "OPENROUTER_API_KEY")}
+            with mock.patch.dict(os.environ, dict(clean, **env), clear=True), \
+                    mock.patch.object(jev, "CREDENTIALS", f.name):
+                return jev.api_key()
+
+    def test_typesafe(self):
+        self.assertEqual(self.key({"TYPESAFE_API_KEY": "ts"}), ("ts", None))
+        self.assertEqual(self.key({}, "TYPESAFE_API_KEY=ts\n"), ("ts", None))
+
+    def test_openrouter(self):
+        self.assertEqual(self.key({"OPENROUTER_API_KEY": "or"}), ("or", jev.OPENROUTER))
+        self.assertEqual(self.key({}, "# jev\nOPENROUTER_API_KEY=or\n"), ("or", jev.OPENROUTER))
+
+    def test_typesafe_wins(self):
+        self.assertEqual(self.key({"OPENROUTER_API_KEY": "or"}, "TYPESAFE_API_KEY=ts\n"), ("ts", None))
+
+    def test_none(self):
+        self.assertEqual(self.key({}), (None, None))
+
+
 class AskWriterTest(unittest.TestCase):
     """With jev, a small Claude model (config ask_model) writes the line when
     the session needs the user and asks no open question."""

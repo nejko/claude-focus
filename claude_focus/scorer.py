@@ -1,9 +1,10 @@
 """One scorer for all sessions, so the scores can be compared. Default
 (config "scorer": "claude"): a headless `claude -p` call on your own Claude
 Code login, which also writes the ask and the reason, about $0.010 per call on
-Sonnet 5.5. Alternative ("scorer": "jev"): jev (jev.py, a TypeSafe key, about
-$0.0001 per call); then a small Claude model ("ask_model", Haiku 5.5) writes
-the one-line request for the sessions that need the user (write_ask)."""
+Sonnet 5.5. Alternative ("scorer": "jev"): jev (jev.py, a TypeSafe or
+OpenRouter key, about $0.0001 per call); then a small Claude model
+("ask_model", Haiku 5.5) writes the one-line request for the sessions that
+need the user (write_ask)."""
 import asyncio
 import datetime as dt
 import json

@@ -8,3 +8,18 @@ dist/
 *.egg-info/
 .env
 credentials
+
+# Devenv
+.devenv*
+devenv.nix
+devenv.yaml
+devenv.lock
+devenv.local.nix
+devenv.local.yaml
+
+# direnv
+.direnv
+.envrc
+
+# pre-commit
+.pre-commit-config.yaml

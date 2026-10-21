@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "claude-focus"
 version = "0.1.0"
-description = "One priority queue over all your running Claude Code sessions in iTerm2"
+description = "One priority queue over all your running Claude Code sessions in herdr or iTerm2"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"

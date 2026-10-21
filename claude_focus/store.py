@@ -18,7 +18,7 @@ DEFAULT_CONFIG = {
     "user_name": "the user",            # how messages to sessions and the scorer name you, e.g. "Ana"
     "user_role": "",                    # optional, for the scorer: "the CEO of two companies"
     "companies": {},                    # folder name prefix -> company label, e.g. {"acme": "Acme"}
-    "scorer": "claude",                 # "claude" (your Claude Code login) or "jev" (TypeSafe key)
+    "scorer": "claude",                 # "claude" (your Claude Code login) or "jev" (TypeSafe or OpenRouter key)
     "jev_model": "jev-latest",
     "scorer_model": "claude-sonnet-5-5",  # used only when scorer is "claude"
     "ask_model": "claude-haiku-5-5",    # with jev: writes the one-line request ("" = only ask.extract)
@@ -26,7 +26,12 @@ DEFAULT_CONFIG = {
     "poll_seconds": 3,
     "aging_points_per_hour": 0.15,
     "aging_max": 10,
-    "hotkeys": False,                   # only in a focus window; not in the service
+    "terminal": "auto",                 # "auto", "herdr" or "iterm": where the sessions run (terminal.detect)
+    "herdr_socket": "",                 # herdr's API socket; "" = $HERDR_SOCKET_PATH, else ~/.config/herdr/herdr.sock
+    "herdr_sidebar": True,              # put each session's place in the queue into herdr's pane metadata
+    "herdr_key_go": "prefix+a",         # the herdr keys that setup adds: go to the top of the queue,
+    "herdr_key_focus_window": "prefix+f",  # and show the focus screen
+    "hotkeys": False,                   # iTerm2: only in a focus window; not in the service
     "hotkey_go": "ctrl+option+n",
     "hotkey_focus_window": "ctrl+option+f",
     "zoom": True,
