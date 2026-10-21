@@ -145,6 +145,7 @@ class Bridge:
     to another workspace, so every poll looks them up again (refresh)."""
     name, label = "herdr", "herdr"
     profiles = restores = hotkeys = False  # iTerm2's: colored profiles, window restore, global hotkeys
+    sidebar = True                         # the queue in herdr's sidebar (report)
 
     def __init__(self, path=None):
         self.path = path or socket_path()

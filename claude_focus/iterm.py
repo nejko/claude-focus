@@ -23,6 +23,7 @@ def own_pane():
 class Bridge:
     name, label = "iterm", "iTerm2"
     profiles = restores = hotkeys = True  # colored profiles, window restore (restore.py), global hotkeys
+    sidebar = False                       # no place for the queue but the focus screen (report)
 
     def __init__(self, connection):
         self.conn = connection

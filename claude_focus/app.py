@@ -188,7 +188,7 @@ class App:
         if self.engine:
             self._schedule_scores(state)
             self._write_status()
-            if self.cfg["herdr_sidebar"]:
+            if self.cfg["herdr_sidebar"] and self.bridge.sidebar:
                 await self.bridge.report(self._marks())
         else:
             self._read_status()
@@ -1199,7 +1199,8 @@ class App:
         the service again on that one."""
         while True:
             await asyncio.sleep(TERMINAL_CHECK)
-            kind = await asyncio.get_event_loop().run_in_executor(None, terminal.detect)
+            kind = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: terminal.detect(current=self.bridge.name))
             if kind and kind != self.bridge.name:
                 store.log(f"service: the sessions run in {kind} now, not {self.bridge.name}: restarting")
                 raise SystemExit(0)

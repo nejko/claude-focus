@@ -39,13 +39,13 @@ class WhereTest(unittest.TestCase):
 
 
 class DetectTest(unittest.TestCase):
-    def detect(self, environ, cfg=None, herdr_up=True, iterm_up=True, counts=None):
+    def detect(self, environ, cfg=None, herdr_up=True, iterm_up=True, counts=None, current=None):
         with mock.patch.dict(os.environ, environ, clear=True), \
                 mock.patch.object(herdr, "ping", return_value={"version": "0.9.5"} if herdr_up else None), \
                 mock.patch.object(terminal, "iterm_running", return_value=iterm_up), \
                 mock.patch.object(terminal, "where_sessions_run", return_value=counts or {"herdr": 0, "iterm": 0}), \
                 mock.patch("claude_focus.sessions.list_sessions", return_value=[]):
-            return terminal.detect(cfg or {"terminal": "auto"})
+            return terminal.detect(cfg or {"terminal": "auto"}, current)
 
     def test_the_config_decides_first(self):
         self.assertEqual(self.detect(env(HERDR_PANE_ID="w1:p1"), {"terminal": "iterm"}), "iterm")
@@ -61,6 +61,13 @@ class DetectTest(unittest.TestCase):
         self.assertEqual(self.detect(env(), counts={"herdr": 1, "iterm": 4}), "iterm")
         self.assertEqual(self.detect(env(), counts={"herdr": 4, "iterm": 1}), "herdr")
         self.assertEqual(self.detect(env(), counts={"herdr": 0, "iterm": 0}), "herdr")
+
+    def test_a_tie_keeps_the_service_where_it_runs(self):
+        # Without this, the service restarted on the other terminal every minute while the counts tied.
+        for counts in ({"herdr": 0, "iterm": 0}, {"herdr": 3, "iterm": 3}):
+            self.assertEqual(self.detect(env(), counts=counts, current="iterm"), "iterm")
+            self.assertEqual(self.detect(env(), counts=counts, current="herdr"), "herdr")
+        self.assertEqual(self.detect(env(), counts={"herdr": 1, "iterm": 4}, current="herdr"), "iterm")
 
     def test_whichever_runs(self):
         self.assertEqual(self.detect(env(), herdr_up=False), "iterm")

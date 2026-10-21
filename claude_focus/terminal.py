@@ -48,11 +48,12 @@ def where_sessions_run(pids, ps_out=None):
     return counts
 
 
-def detect(cfg=None):
+def detect(cfg=None, current=None):
     """Which terminal to drive. Config "terminal" when it names one; else the
     one this process runs in (a herdr pane or key binding, an iTerm2 pane);
     else, for the service, the one that runs most of the live Claude
-    sessions, by their process tree, when both run; else whichever runs.
+    sessions, by their process tree, when both run (on a tie the one it
+    drives now, `current`, else herdr); else whichever runs.
     None: neither runs."""
     cfg = cfg or store.load_config()
     choice = cfg.get("terminal") or "auto"
@@ -68,6 +69,8 @@ def detect(cfg=None):
     if herdr_up and iterm_up:
         from . import sessions as sessions_mod
         n = where_sessions_run([s["pid"] for s in sessions_mod.list_sessions() or []])
+        if n[ITERM] == n[HERDR] and current in (ITERM, HERDR):
+            return current  # a tie (0 and 0 too) never moves the service
         return ITERM if n[ITERM] > n[HERDR] else HERDR
     return HERDR if herdr_up else ITERM if iterm_up else None
 
