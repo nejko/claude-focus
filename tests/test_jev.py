@@ -114,5 +114,59 @@ class JevMappingTest(unittest.TestCase):
         self.assertEqual(r["ask"], "The session is done or says that nothing is needed from the user")
 
 
+class AskWriterTest(unittest.TestCase):
+    """With jev, a small Claude model (config ask_model) writes the line when
+    the session needs the user and asks no open question."""
+
+    SESS = {"name": "web", "status": "idle", "statusSince": 1, "cwd": "/x"}
+    LAST = "I sent the points to the other session.\n\nOne step for you: reload the extension."
+
+    def run_score(self, kind="action", last=LAST, status="idle", cfg=None, reply=None):
+        import asyncio
+        from unittest import mock
+        from claude_focus import scorer
+        jev_result = {"priority": 40, "kind": kind, "ask": "rules line", "cost_usd": 0.0001, "model": "jev"}
+        cfg = dict(store.load_config(), scorer="jev", **(cfg or {}))
+        data = {"structured_output": {"ask": "Reload the extension in chrome://extensions"},
+                "total_cost_usd": 0.0005} if reply is None else reply
+        with mock.patch.object(jev, "score", mock.AsyncMock(return_value=dict(jev_result))), \
+                mock.patch.object(scorer, "_claude", mock.AsyncMock(return_value=data)) as call:
+            r = asyncio.run(scorer.score(dict(self.SESS, status=status), "", last, cfg))
+        return r, call
+
+    def test_the_model_writes_the_line(self):
+        r, call = self.run_score()
+        self.assertEqual(r["ask"], "Reload the extension in chrome://extensions")
+        self.assertEqual((r["ask_model"], r["ask_cost_usd"]), ("claude-haiku-5-5", 0.0005))
+        prompt, system, _, model, _ = call.await_args.args
+        self.assertEqual(model, "claude-haiku-5-5")
+        self.assertIn("reload the extension", prompt)
+        self.assertIn("immediate next step", system)
+
+    def test_not_for_a_session_that_needs_nothing(self):
+        for kind in ("info", "nothing"):
+            r, call = self.run_score(kind=kind)
+            call.assert_not_awaited()
+            self.assertEqual(r["ask"], "rules line")
+
+    def test_not_for_an_open_question(self):
+        r, call = self.run_score(last="Done.\n\nOPEN QUESTIONS:\n- Which plan? [A / B]")
+        call.assert_not_awaited()
+
+    def test_off_in_the_config(self):
+        r, call = self.run_score(cfg={"ask_model": ""})
+        call.assert_not_awaited()
+        self.assertNotIn("ask_model", r)
+
+    def test_a_failed_call_keeps_the_rules_line(self):
+        r, call = self.run_score(reply=None or {})
+        self.assertEqual(r["ask"], "rules line")
+        self.assertNotIn("ask_model", r)
+
+    def test_a_long_line_is_cut(self):
+        r, _ = self.run_score(reply={"structured_output": {"ask": "x" * 300}, "total_cost_usd": 0.0005})
+        self.assertLessEqual(len(r["ask"]), ask.MAX)
+
+
 if __name__ == "__main__":
     unittest.main()

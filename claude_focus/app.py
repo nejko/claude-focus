@@ -304,9 +304,12 @@ class App:
                 result = await scorer.score(s, screen, last, self.cfg)
             if result:
                 store.update_state(lambda st: st["sessions"].setdefault(key, {}).__setitem__("score", result))
+                line = f" + {result['ask_model']} ${result['ask_cost_usd']:.4f}" if "ask_model" in result else ""
                 store.log(f"scored {s.get('name')}: {result['priority']} {result['kind']} {result['ask']}"
-                          f" (${result.get('cost_usd') or 0:.4f})")
+                          f" (${result.get('cost_usd') or 0:.4f}{line})")
                 costs.record(s.get("name"), result.get("model"), result.get("cost_usd"))
+                if "ask_model" in result:
+                    costs.record(s.get("name"), result["ask_model"], result["ask_cost_usd"])
         finally:
             self.scoring.discard(key)
             self.wake.set()

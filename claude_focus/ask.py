@@ -1,5 +1,7 @@
 """The one-line "what does this session need from the user" text, taken from
-the session itself (jev chooses and scores; it does not write text).
+the session itself (jev chooses and scores; it does not write text). With
+jev, scorer.write_ask lets a small Claude model write the line instead; this
+is the fallback when that is off or fails.
 
 Order: an open question on the screen, an open AskUserQuestion in the
 transcript, the first item under a "needed from you" style heading, a
@@ -22,7 +24,7 @@ NOTHING = re.compile(
 BULLET = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
 
 
-def _tidy(text):
+def tidy(text):
     text = re.sub(r"\*\*|`", "", text)
     text = re.sub(r"\s+", " ", text).strip(" :-")
     return text if len(text) <= MAX else text[:MAX - 1].rstrip() + "…"
@@ -37,10 +39,10 @@ def screen_question(screen):
         q = [x.strip()[1:].strip() for x in lines
              if x.strip().startswith("│") and x.count("│") == 1]
         if q:
-            return _tidy(" ".join(q))
+            return tidy(" ".join(q))
     for x in reversed(lines):
         if "Do you want to" in x and x.strip().endswith("?"):
-            return _tidy("Permission prompt: " + x.strip())
+            return tidy("Permission prompt: " + x.strip())
     return ""
 
 
@@ -54,13 +56,13 @@ def _after_heading(text):
             continue
         if HEADINGS.match(line):
             continue
-        return _tidy(BULLET.sub("", line))
+        return tidy(BULLET.sub("", line))
     return ""
 
 
 def _recap(screen):
     m = re.search(r"recap:\s*(.+?)(?:\(disable recaps|\n\s*\n|$)", screen.replace("\n", " \n"), re.S)
-    return _tidy(m.group(1)) if m else ""
+    return tidy(m.group(1)) if m else ""
 
 
 def _first_sentence(text):
@@ -68,12 +70,13 @@ def _first_sentence(text):
         para = BULLET.sub("", para).strip()
         if para and not para.startswith(("#", "|", "```", "...")):
             m = re.match(r"(.+?[.!?])(\s|$)", para)
-            return _tidy(m.group(1) if m else para)
+            return tidy(m.group(1) if m else para)
     return ""
 
 
-def extract(screen, last_text, status):
-    """Best one-line ask for the row."""
+def open_question(screen, last_text, status):
+    """The text of a question the session shows or asked and that is still
+    open (a dialog on the screen, an AskUserQuestion in the transcript), or ""."""
     if status == "waiting":
         q = screen_question(screen)
         if q:
@@ -81,10 +84,18 @@ def extract(screen, last_text, status):
     if "OPEN QUESTIONS:" in last_text:
         first = last_text.split("OPEN QUESTIONS:", 1)[1].strip().splitlines()
         if first:
-            return _tidy(BULLET.sub("", first[0]).split(" [")[0])
+            return tidy(BULLET.sub("", first[0]).split(" [")[0])
+    return ""
+
+
+def extract(screen, last_text, status):
+    """Best one-line ask for the row."""
+    q = open_question(screen, last_text, status)
+    if q:
+        return q
     body = last_text.split("OPEN QUESTIONS:", 1)[0]
     for fn in (lambda: _after_heading(body),
-               lambda: _tidy(NOTHING.search(body).group(1)) if NOTHING.search(body) else "",
+               lambda: tidy(NOTHING.search(body).group(1)) if NOTHING.search(body) else "",
                lambda: _recap(screen),
                lambda: _first_sentence(body)):
         out = fn()

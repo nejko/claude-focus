@@ -4,7 +4,8 @@ probabilities, no text generation. About $0.0001 and 0.4 s per call
 
 jev answers three questions: the priority (a score on five levels), the kind
 of request (a choice) and the effort (a choice). The one-line request text
-comes from the session itself (ask.py), the company from the folder name."""
+comes from the session itself (ask.py), and scorer.write_ask replaces it when
+the session needs the user; the company comes from the folder name."""
 import datetime as dt
 import os
 

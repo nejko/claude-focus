@@ -194,11 +194,15 @@ There are two scorers (config `scorer`):
   TypeSafe key (`TYPESAFE_API_KEY` in the environment, or in
   `~/.config/claude-focus/credentials` as `TYPESAFE_API_KEY=...`, mode 600)
   and the jev extra: `uv tool install --force 'claude-focus[jev] @ git+https://github.com/nejko/claude-focus'`.
-  jev writes no text, so the one-line request
-  comes from the session itself: the open question on the screen, the first
-  item under a "Needed from you" style heading, a "nothing needs you"
-  sentence, Claude Code's recap line, or the first sentence of the last
-  message.
+  jev writes no text. An open question shows with its own text. Otherwise,
+  when jev says the session needs you, Claude Haiku 5.5 (`ask_model`) writes
+  the one-line request from the last message and the screen: the immediate
+  next step, in the message's language. That is a second `claude -p` call
+  for those sessions only, measured at $0.0002 to $0.0006. With
+  `"ask_model": ""`, or when that call fails, the line comes from the
+  session itself: the first item under a "Needed from you" style heading, a
+  "nothing needs you" sentence, Claude Code's recap line, or the first
+  sentence of the last message.
 
 At 150 to 350 calls a day, the claude scorer costs about $45 to $105 per 30
 days, jev about $0.50 to $1. `claude-focus cost` shows the real numbers.
@@ -359,6 +363,7 @@ an idle session gets no message.
 | `scorer` | `"claude"` | `"claude"` or `"jev"` |
 | `scorer_model` | `"claude-sonnet-5-5"` | The model of the claude scorer |
 | `jev_model` | `"jev-latest"` | The model of the jev scorer |
+| `ask_model` | `"claude-haiku-5-5"` | With jev: the model that writes the one-line request (`""` = off) |
 | `scorer_parallel` | `4` | Sessions scored at the same time |
 | `poll_seconds` | `3` | How often the state is read |
 | `aging_points_per_hour`, `aging_max` | `0.15`, `10` | The bonus for waiting |
@@ -390,7 +395,9 @@ All under `~/.claude-focus/` (mode 700):
 - For each score, the scorer gets the bottom 45 lines of the session's
   screen, its last message (up to 3,500 characters), its folder and name,
   and your `priorities.md`. The claude scorer sends them to Anthropic
-  through your Claude Code; jev sends them to TypeSafe. claude-focus sends
+  through your Claude Code; jev sends them to TypeSafe, and for the
+  request line (`ask_model`) the screen and the last message also go to
+  Anthropic through your Claude Code. claude-focus sends
   nothing else anywhere.
 - It types into your terminals only for wake-up messages (only into an
   empty prompt), the restore commands, Esc on `reboot`, the profile

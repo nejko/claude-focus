@@ -21,6 +21,7 @@ DEFAULT_CONFIG = {
     "scorer": "claude",                 # "claude" (your Claude Code login) or "jev" (TypeSafe key)
     "jev_model": "jev-latest",
     "scorer_model": "claude-sonnet-5-5",  # used only when scorer is "claude"
+    "ask_model": "claude-haiku-5-5",    # with jev: writes the one-line request ("" = only ask.extract)
     "scorer_parallel": 4,
     "poll_seconds": 3,
     "aging_points_per_hour": 0.15,

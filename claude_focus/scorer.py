@@ -2,13 +2,14 @@
 (config "scorer": "claude"): a headless `claude -p` call on your own Claude
 Code login, which also writes the ask and the reason, about $0.010 per call on
 Sonnet 5.5. Alternative ("scorer": "jev"): jev (jev.py, a TypeSafe key, about
-$0.0001 per call)."""
+$0.0001 per call); then a small Claude model ("ask_model", Haiku 5.5) writes
+the one-line request for the sessions that need the user (write_ask)."""
 import asyncio
 import datetime as dt
 import json
 import os
 
-from . import store
+from . import ask, store
 
 SCHEMA = {
     "type": "object",
@@ -108,21 +109,62 @@ async def score(sess, screen, last_text, cfg, now=None):
     last_error = None
     result["scored_for"] = sess["statusSince"]
     result["scored_at"] = int(now.timestamp() * 1000)
+    # jev writes no text. When the session needs the user and asks no open
+    # question (whose own text is best), a small Claude model writes the line.
+    if cfg.get("ask_model") and result["kind"] not in ("info", "nothing") \
+            and not ask.open_question(screen, last_text, sess["status"]):
+        line, cost = await write_ask(sess, screen, last_text, cfg)
+        if line:
+            result.update(ask=line, ask_model=cfg["ask_model"], ask_cost_usd=cost)
     return result
 
 
-async def score_claude(sess, screen, last_text, cfg, now=None):
-    """Returns the score dict, or None on failure (logged, and kept in
-    last_error so the focus window shows it)."""
+ASK_SCHEMA = {"type": "object", "properties": {"ask": {"type": "string"}},
+              "required": ["ask"], "additionalProperties": False}
+
+ASK_SYSTEM = """You write one line in {user}'s queue of Claude Code sessions: what {user} \
+must do in this session NOW, so that {user} can act without reading the session first.
+
+- Write the immediate next step that waits on {user}. It is usually the explicit request \
+near the end of the last message (often under a heading such as "Needed from you", \
+"Next", "One step for you" or "What you need to do"), or the "recap:" line on the screen.
+- Not what the session did, not work that it or another session will do, and not \
+decisions that it only lists for later.
+- Imperative, at most 100 characters, in the language of the last message.
+- Name the concrete thing: the page, file, button, command or person."""
+
+
+def ask_prompt(sess, screen, last_text):
+    return "\n".join([
+        f"SESSION: {sess.get('name', '')}",
+        "",
+        "=== WHAT IS ON ITS SCREEN NOW (bottom of the terminal) ===",
+        screen.strip() or "(not available)",
+        "",
+        "=== ITS LAST MESSAGE ===",
+        last_text.strip() or "(none)",
+    ])
+
+
+async def write_ask(sess, screen, last_text, cfg):
+    """(line, cost in USD) from cfg["ask_model"]; ("", cost) on failure, and
+    the row keeps the line that ask.extract found."""
+    data = await _claude(ask_prompt(sess, screen, last_text), store.say(ASK_SYSTEM), ASK_SCHEMA,
+                         cfg["ask_model"], sess.get("name"))
+    line = ((data or {}).get("structured_output") or {}).get("ask", "")
+    return ask.tidy(line) if line else "", (data or {}).get("total_cost_usd") or 0
+
+
+async def _claude(prompt, system, schema, model, name):
+    """One headless `claude -p` call with a JSON schema: Claude Code's JSON
+    output, or None on failure (logged; last_error says why)."""
     global last_error
-    now = now or dt.datetime.now()
-    prompt = build_prompt(sess, screen, last_text, now)
     args = [
-        "claude", "-p", "--model", cfg["scorer_model"],
+        "claude", "-p", "--model", model,
         "--output-format", "json", "--no-session-persistence",
         "--tools", "", "--settings", '{"disableAllHooks":true}',
         "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-        "--system-prompt", system_prompt(), "--json-schema", json.dumps(SCHEMA),
+        "--system-prompt", system, "--json-schema", json.dumps(schema),
     ]
     # The scorer needs no thinking, MCP servers, CLAUDE.md or memory: without
     # them a call has about 3.5k input tokens instead of about 10.5k. Each
@@ -138,18 +180,29 @@ async def score_claude(sess, screen, last_text, cfg, now=None):
         )
         out, err = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout=180)
         data = json.loads(out.decode() or "{}")
-        result = data.get("structured_output")
-        if data.get("is_error") or not isinstance(result, dict):
-            store.log(f"score failed {sess.get('name')}: {out.decode()[:300]} {err.decode()[:300]}")
+        if data.get("is_error") or not isinstance(data.get("structured_output"), dict):
+            store.log(f"{model} failed {name}: {out.decode()[:300]} {err.decode()[:300]}")
             last_error = f"claude: {(err.decode() or out.decode()).strip()[:160]}"
             return None
         last_error = None
-        result["scored_for"] = sess["statusSince"]
-        result["cost_usd"] = data.get("total_cost_usd")
-        result["model"] = cfg["scorer_model"]
-        result["scored_at"] = int(now.timestamp() * 1000)
-        return result
+        return data
     except (asyncio.TimeoutError, OSError, ValueError) as ex:  # e.g. no `claude` on PATH
-        store.log(f"score error {sess.get('name')}: {ex!r}")
+        store.log(f"{model} error {name}: {ex!r}")
         last_error = f"claude: {ex!r}"[:200]
         return None
+
+
+async def score_claude(sess, screen, last_text, cfg, now=None):
+    """Returns the score dict, or None on failure (logged, and kept in
+    last_error so the focus window shows it)."""
+    now = now or dt.datetime.now()
+    data = await _claude(build_prompt(sess, screen, last_text, now), system_prompt(), SCHEMA,
+                         cfg["scorer_model"], sess.get("name"))
+    if data is None:
+        return None
+    result = data["structured_output"]
+    result["scored_for"] = sess["statusSince"]
+    result["cost_usd"] = data.get("total_cost_usd")
+    result["model"] = cfg["scorer_model"]
+    result["scored_at"] = int(now.timestamp() * 1000)
+    return result
