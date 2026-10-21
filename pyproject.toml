@@ -29,4 +29,4 @@ claude-focus = "claude_focus.cli:main"
 packages = ["claude_focus"]
 
 [tool.setuptools.package-data]
-claude_focus = ["priorities.template.md"]
+claude_focus = ["priorities.template.md", "claude_md_rule.md"]

@@ -34,61 +34,76 @@ sessions; expect rough edges elsewhere, and please open an issue.
 
 ## Install
 
+First turn on iTerm2's Python API: Settings > General > Magic > Enable
+Python API. Then, in iTerm2:
+
 ```sh
-git clone https://github.com/nejko/claude-focus.git
-cd claude-focus
-python3 -m venv .venv
-.venv/bin/pip install -e .          # or -e '.[jev]' for the jev scorer (see "Scoring")
-mkdir -p ~/.local/bin
-ln -s "$PWD/.venv/bin/claude-focus" ~/.local/bin/claude-focus   # any folder on your PATH
+uv tool install git+https://github.com/nejko/claude-focus
+claude-focus setup
 ```
 
-Then:
+No uv yet? `brew install uv`, or see [docs.astral.sh/uv](https://docs.astral.sh/uv/).
+pipx works too: `pipx install git+https://github.com/nejko/claude-focus`.
 
-1. In iTerm2, turn on the Python API: Settings > General > Magic > Enable
-   Python API. The first time claude-focus connects (the focus screen, and
-   again the service), macOS asks whether it may control iTerm2. Allow it.
-2. Start the background service (a LaunchAgent that starts at login and
-   restarts after a crash or when iTerm2 restarts):
-   `claude-focus install-daemon`. Run it from the shell whose PATH the
-   service should have: the scorer needs `claude`, and your check commands
-   need their tools.
-3. Add the prompt hook to `~/.claude/settings.json` (see "Pending waits").
-4. Add the rule in [docs/claude-md-rule.md](docs/claude-md-rule.md) to your
-   `~/.claude/CLAUDE.md`, so that sessions know how to wait.
-5. Open a new iTerm2 window and run `claude-focus`. Keep this window open;
-   it is the focus screen.
-6. Optional: write `~/.claude-focus/config.json` (see "Configuration"), at
-   least your name, and edit `~/.claude-focus/priorities.md`, the rules the
-   scorer follows.
+`claude-focus setup` does the rest and tells you what it did. You can run it
+again at any time; it skips what is done. It:
+
+1. checks for macOS, iTerm2 and `claude`, and connects to iTerm2. The first
+   time, macOS asks whether claude-focus may control iTerm2: allow it.
+2. asks your name, for the messages to sessions
+   (`~/.claude-focus/config.json`).
+3. adds the prompt hook to `~/.claude/settings.json` (see "Pending waits").
+4. adds a short rule to `~/.claude/CLAUDE.md`, so that sessions know how to
+   wait (the text is in
+   [claude_focus/claude_md_rule.md](claude_focus/claude_md_rule.md)).
+5. asks whether you want free terminals: it adds a green iTerm2 profile and
+   lets claude-focus switch panes to it (see "Free terminals").
+6. starts the background service, a LaunchAgent that starts at login and
+   restarts after a crash or when iTerm2 restarts. It gets the PATH of the
+   shell you run setup from: the scorer needs `claude`, and your check
+   commands need their tools.
+7. opens the focus screen in a new iTerm2 window. Keep that window open.
+
+Before it changes `settings.json` or `CLAUDE.md` the first time, setup keeps
+a copy next to it (`.before-claude-focus`). `claude-focus setup --dry-run`
+shows what it would do; `--yes` takes the defaults without asking.
+
+The scorer follows the rules in `~/.claude-focus/priorities.md`. Edit them
+to say what matters to you.
+
+### Upgrade
+
+`uv tool upgrade claude-focus && claude-focus setup` (setup restarts the
+service on the new code).
+
+### Uninstall
+
+`claude-focus uninstall` removes the service, the hook, the
+CLAUDE.md rule and the green profile, and keeps your state in
+`~/.claude-focus` (`--purge` removes it too). Then
+`uv tool uninstall claude-focus`.
+
+### Development
+
+Clone the repo, `python3 -m venv .venv &&
+.venv/bin/pip install -e '.[jev]'`, and run `.venv/bin/claude-focus` (or
+link `bin/claude-focus` onto your PATH).
 
 ## Commands
 
 ```sh
 claude-focus                  # the focus screen (open it in its own iTerm2 window)
+claude-focus setup            # set everything up, or check it again
 claude-focus list             # print the queue once
 claude-focus pending ...      # from inside a session: wait for something external
 claude-focus restore          # after a crash: open the sessions of the last iTerm2 run again
 claude-focus reboot           # before a planned restart: save the layout, stop working sessions
 claude-focus cost             # scorer calls and spend per day
 claude-focus status           # is the service running?
-claude-focus install-daemon   # install and start the background service
-claude-focus uninstall-daemon # stop and remove it
+claude-focus uninstall        # undo setup
 ```
 
 ## The focus screen
-
-```
- NEED YOU  2 ──────────────────────────────────────────────────────────
-▌ 82 ██████▌      1h02m  billing-api             decision  Approve the migration plan?  ~5 min
-  54 ████▎           12m  website                 decision  Which text should the button use?
-
- PENDING  3 ───────────────────────────────────────────────────────────
-  11:26             in 7m  release-notes           check     Wait for the v2.0 tag
-
- AVAILABLE TERMINALS  2 ───────────────────────────────────────────────
-  ❯                        ~                       zsh       ttys002
-```
 
 The sections, top to bottom:
 
@@ -175,7 +190,8 @@ There are two scorers (config `scorer`):
   questions with probabilities. About $0.0001 per call, but it needs a
   TypeSafe key (`TYPESAFE_API_KEY` in the environment, or in
   `~/.config/claude-focus/credentials` as `TYPESAFE_API_KEY=...`, mode 600)
-  and `pip install -e '.[jev]'`. jev writes no text, so the one-line request
+  and the jev extra: `uv tool install --force 'claude-focus[jev] @ git+https://github.com/nejko/claude-focus'`.
+  jev writes no text, so the one-line request
   comes from the session itself: the open question on the screen, the first
   item under a "Needed from you" style heading, a "nothing needs you"
   sentence, Claude Code's recap line, or the first sentence of the last
@@ -219,9 +235,9 @@ transcript, and only a prompt that you typed ends the wait.
 
 The `UserPromptSubmit` hook tells Claude at once that your typing ended its
 wait, and gives it the exact command to set the same wait again. Without the
-hook, the engine still ends the wait, but Claude does not learn it. Add it
-to `~/.claude/settings.json` (running sessions pick it up without a
-restart):
+hook, the engine still ends the wait, but Claude does not learn it.
+`claude-focus setup` adds it to `~/.claude/settings.json`, and running
+sessions pick it up without a restart. By hand, it looks like this:
 
 ```json
 "hooks": {
@@ -247,29 +263,34 @@ Safety rules of the waker:
 
 ## Free terminals
 
-When you are done with a session, you can mark its pane free by switching it
-to an iTerm2 profile named `Available` (make one with a green background,
-and bind a key to "Change Profile" in its key bindings). Free panes show
-under AVAILABLE TERMINALS: their folder, the program and the tty. Enter goes
-to one; `n` goes to the first one at once. Only panes with that profile show,
-and a pane in which a Claude session runs is never free. Config
-`free_profile` names another profile.
+A pane whose Claude session has ended is free for the next one. claude-focus
+marks it with a green iTerm2 profile, `Available`, and lists it under
+AVAILABLE TERMINALS: its folder, the program and the tty. Enter goes to one;
+`n` goes to the first one at once. Only panes with that profile show, and a
+pane in which a Claude session runs is never free.
 
-This is the only part of claude-focus that needs iTerm2 profiles; the
-colors of the focus screen need no setup. Without a profile named
-`Available`, the section stays empty, and a switch to a profile that does
-not exist changes nothing.
-
-With `"auto_profiles": true`, the engine keeps the color true by itself:
+If you say yes to free terminals in `claude-focus setup`, it adds the
+profile as an iTerm2 dynamic profile (your default profile with a green
+background, in
+`~/Library/Application Support/iTerm2/DynamicProfiles/claude-focus.json`)
+and turns on `auto_profiles`. A profile named `Available` that you made
+yourself is used as it is. Then the engine keeps the color true:
 
 - When a Claude session ends and its pane is back at a bare shell (zsh,
   bash, fish, ...), the pane gets the free profile. A pane that runs another
   program after the session (vim, a script) is not free.
-- When a Claude session starts in a free pane, the pane gets
-  `session_profile` (Default).
+- When a Claude session starts in a free pane, the pane gets back your
+  default profile (`session_profile`).
 
-The engine switches a profile with iTerm2's `SetProfile` escape sequence,
-sent into the pane as program output; nothing shows on the screen.
+You can also mark a pane free by hand: bind a key to "Change Profile" >
+Available in iTerm2's key bindings. Config `free_profile` names another
+profile.
+
+This is the only part of claude-focus that uses iTerm2 profiles; the colors
+of the focus screen need no setup. Without the profile, the section stays
+empty, and a switch to a profile that does not exist changes nothing. The
+engine switches a profile with iTerm2's `SetProfile` escape sequence, sent
+into the pane as program output; nothing shows on the screen.
 
 ## Crash recovery
 
@@ -326,7 +347,7 @@ an idle session gets no message.
 | `return_after_answer` | `true` | Come back after you answer a question |
 | `hotkeys`, `hotkey_go`, `hotkey_focus_window` | `false`, ⌃⌥N, ⌃⌥F | Global hotkeys (only a focus window registers them) |
 | `free_profile`, `session_profile` | `"Available"`, `"Default"` | The iTerm2 profiles of free terminals |
-| `auto_profiles` | `false` | Switch those profiles by itself |
+| `auto_profiles` | `false` | Switch those profiles by itself (setup turns it on if you want free terminals) |
 | `wake_check_output` | `false` | Put a check's output into the wake-up message |
 
 ## Files

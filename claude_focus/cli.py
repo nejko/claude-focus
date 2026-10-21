@@ -257,7 +257,9 @@ PLIST = os.path.expanduser(f"~/Library/LaunchAgents/{LABEL}.plist")
 
 
 def iterm_running():
-    return subprocess.run(["pgrep", "-xq", "iTerm2"]).returncode == 0
+    """From ps (pgrep sees no processes in some sandboxes)."""
+    out = subprocess.run(["ps", "-axo", "comm"], capture_output=True, text=True).stdout
+    return any(line.rstrip().endswith("/MacOS/iTerm2") for line in out.splitlines())
 
 
 def cmd_daemon():
@@ -307,15 +309,30 @@ def cmd_install_daemon():
     with open(PLIST, "wb") as f:
         plistlib.dump(plist, f)
     domain = f"gui/{os.getuid()}"
-    _launchctl("bootout", f"{domain}/{LABEL}")
-    r = _launchctl("bootstrap", domain, PLIST)
-    if r.returncode != 0:
+    _stop_service(domain)
+    # A bootstrap right after a bootout can fail with "5: Input/output
+    # error" (seen 2026-10-21, while the old service was still going away).
+    for attempt in range(5):
+        r = _launchctl("bootstrap", domain, PLIST)
+        if r.returncode == 0:
+            break
+        time.sleep(1 + attempt)
+    else:
         sys.exit(f"launchctl bootstrap failed: {r.stderr.strip()}")
     print(f"Installed and started {LABEL}. Log: {plist['StandardOutPath']}")
 
 
+def _stop_service(domain, seconds=10):
+    """Boot the service out and wait until launchd no longer knows it:
+    bootout returns before the old process is gone."""
+    _launchctl("bootout", f"{domain}/{LABEL}")
+    deadline = time.time() + seconds
+    while time.time() < deadline and _launchctl("print", f"{domain}/{LABEL}").returncode == 0:
+        time.sleep(0.3)
+
+
 def cmd_uninstall_daemon():
-    _launchctl("bootout", f"gui/{os.getuid()}/{LABEL}")
+    _stop_service(f"gui/{os.getuid()}")
     if os.path.exists(PLIST):
         os.remove(PLIST)
     print(f"Stopped and removed {LABEL}.")
@@ -357,7 +374,13 @@ def main():
     elif args[0] == "cost":
         from . import costs
         print(costs.report())
+    elif args[0] == "setup" and set(args[1:]) <= {"--yes", "--dry-run"}:
+        from . import setup
+        setup.Setup(yes="--yes" in args, dry_run="--dry-run" in args).run()
+    elif args[0] == "uninstall" and set(args[1:]) <= {"--purge"}:
+        from . import setup
+        setup.uninstall(purge="--purge" in args)
     else:
-        print("usage: claude-focus [list | pending --help | restore [--dry-run] | reboot [--dry-run] | cost | status | "
-              "install-daemon | uninstall-daemon]")
+        print("usage: claude-focus [setup [--yes] [--dry-run] | uninstall [--purge] | list | pending --help | "
+              "restore [--dry-run] | reboot [--dry-run] | cost | status | install-daemon | uninstall-daemon]")
         sys.exit(2)
