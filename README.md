@@ -143,9 +143,9 @@ window has the keys, its title bar is green.
 
 | Key | Action |
 |---|---|
-| Enter | Go to the selected session; its pane is maximized. If it asks a question, the focus screen comes back when you submit the answers. On a free terminal: go to that terminal |
+| Enter | Go to the selected session; its pane is maximized. If it asks a question, the focus screen comes back when you submit the answers. On a free terminal: choose a folder for a new session there (see "Free terminals") |
 | ↑ ↓ (or k j) | Select another row. The list wraps: ↓ on the last row selects the first, ↑ on the first selects the last |
-| n | Go to the first free terminal |
+| n | Start a new session: choose a folder for the first free terminal |
 | Esc | Select the top of the queue again |
 | s | Snooze the selected session: 1 h, 3 h, tomorrow 09:00, Monday 09:00, or a time you type |
 | u | Unwait: end a snooze, a pending wait or a "done" mark |
@@ -268,9 +268,25 @@ Safety rules of the waker:
 
 A pane whose Claude session has ended is free for the next one. claude-focus
 marks it with a green iTerm2 profile, `Available`, and lists it under
-AVAILABLE TERMINALS: its folder, the program and the tty. Enter goes to one;
-`n` goes to the first one at once. Only panes with that profile show, and a
-pane in which a Claude session runs is never free.
+AVAILABLE TERMINALS: its folder, the program and the tty. Only panes with
+that profile show, and a pane in which a Claude session runs is never free.
+
+Enter on a free terminal, or `n` for the first one, opens a list of folders
+for a new session. It holds every folder that Claude Code has run in (Claude
+Code's own list in `~/.claude.json`) and the subfolders of your project
+folders (`project_roots`), the most recently used first, with the time of
+the last session there. Type to search: every word you type must be in the
+path, and a folder whose own name starts with the first word comes first.
+When no path has what you typed, the letters are an abbreviation of the
+folder's name: `clfo` finds `claude-focus`.
+
+- Enter types `cd <folder> && claude` into the terminal (Ctrl-U first, so
+  anything typed at its prompt goes away), gives the pane your default
+  profile, and takes you there. `new_session_command` sets the command, for
+  example `claude --model opus`. It types only into a pane that is still at
+  a bare shell.
+- Tab goes to the terminal without starting anything.
+- Esc goes back to the list of sessions.
 
 If you say yes to free terminals in `claude-focus setup`, it adds the
 profile as an iTerm2 dynamic profile (your default profile with a green
@@ -352,6 +368,8 @@ an idle session gets no message.
 | `free_profile`, `session_profile` | `"Available"`, `"Default"` | The iTerm2 profiles of free terminals |
 | `auto_profiles` | `false` | Switch those profiles by itself (setup turns it on if you want free terminals) |
 | `wake_check_output` | `false` | Put a check's output into the wake-up message |
+| `new_session_command` | `"claude"` | What a new session in a free terminal runs, after `cd <folder> &&` |
+| `project_roots` | `~/Projects`, `~/code`, `~/src`, ... | Folders whose subfolders the folder list offers too |
 
 ## Files
 
@@ -375,12 +393,13 @@ All under `~/.claude-focus/` (mode 700):
   through your Claude Code; jev sends them to TypeSafe. claude-focus sends
   nothing else anywhere.
 - It types into your terminals only for wake-up messages (only into an
-  empty prompt), the restore commands, Esc on `reboot`, and the profile
-  escape sequence.
+  empty prompt), the restore commands, Esc on `reboot`, the profile
+  escape sequence, and the command of a new session that you start from the
+  folder list.
 - The background service runs your check commands with your shell and your
   PATH.
-- It reads `~/.claude/sessions/` and the transcripts in
-  `~/.claude/projects/`, and never writes them.
+- It reads `~/.claude/sessions/`, the transcripts in `~/.claude/projects/`
+  and the list of folders in `~/.claude.json`, and never writes them.
 
 ## How it works
 

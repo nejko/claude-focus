@@ -33,6 +33,9 @@ DEFAULT_CONFIG = {
     "free_profile": "Available",        # the iTerm2 profile (the green one) of a free terminal
     "session_profile": "Default",       # the profile a free terminal gets when a Claude session starts in it
     "auto_profiles": False,             # switch those two profiles by itself (App._recolor_panes)
+    "new_session_command": "claude",    # what Enter in the folder picker types after `cd <folder> && `
+    "project_roots": ["~/Projects", "~/projects", "~/code", "~/src", "~/dev", "~/Developer",
+                      "~/repos", "~/git", "~/work"],  # their subfolders are offered too (folders.candidates)
     "wake_check_output": False,         # put a check's output into the wake-up message (see pending.wake_message)
 }
 

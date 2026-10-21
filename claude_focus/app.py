@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -15,7 +16,7 @@ import tty as ttymod
 
 import iterm2
 
-from . import costs, look
+from . import costs, folders, look
 from . import pending as pend
 from . import queue as q
 from . import restore, scorer, sessions as sessions_mod, store
@@ -117,7 +118,7 @@ class App:
         self.scoring = set()      # state keys being scored now
         self.checking = set()     # session ids whose pending check runs now
         self.sem = asyncio.Semaphore(self.cfg["scorer_parallel"])
-        self.mode = "main"        # main | snooze | snooze_time | priority | restore
+        self.mode = "main"        # main | snooze | snooze_time | priority | restore | folders
         self.buf = ""
         self.msg = ""
         self.msg_until = 0
@@ -143,6 +144,9 @@ class App:
         self.terminals = []       # the free terminals (see _free_terminals); only a focus window reads them
         self.claude_panes = {}    # iterm session id -> (session name, Unix s last seen) of panes that ran a session
         self.pal = look.DARK      # the colors of iTerm2's theme now
+        self.pick = None          # the folder picker: {"term": free terminal, "sel": row}
+        self.folders = []         # its folders (see folders.candidates)
+        self.matches = []         # the folders that match what the user typed (self.buf)
 
     # ---- data -------------------------------------------------------------
 
@@ -590,7 +594,7 @@ class App:
             self.flash("Nothing selected: ↑ ↓ select a row.")
             return
         if sec == "terminals":
-            await self.go_terminal(item)
+            await self.pick_folder(item)
             return
         s = item["s"]
         pane = self.pane_of(s)
@@ -657,16 +661,54 @@ class App:
         self.sel = None
         await self.go_selected()
 
-    async def go_terminal(self, item=None):
-        """Go to a free terminal: the selected one, or (key n) the first one."""
+    def _free_terminal(self, item=None):
+        """The selected free terminal, or the first one (key n)."""
         terms = (self.view or {}).get("terminals") or []
         item = item or (terms[0] if terms else None)
         if not item:
             self.flash(f"No free terminal: switch a pane to the {self.cfg['free_profile']} profile.")
+        return item
+
+    async def go_terminal(self, item=None):
+        """Go to a free terminal without starting anything in it."""
+        item = self._free_terminal(item)
+        if not item:
             return
         self.sel = None
         if not await self.bridge.go(item["pane"], zoom=self.cfg["zoom"]):
             self.flash(f"The terminal in {item['path']} is gone.")
+
+    async def pick_folder(self, item=None):
+        """Enter on a free terminal, or n: choose the folder of a new Claude
+        session in it. Typing searches the folders (see folders.search)."""
+        item = self._free_terminal(item)
+        if not item:
+            return
+        self.folders = await asyncio.get_event_loop().run_in_executor(
+            None, folders.candidates, self.cfg["project_roots"])
+        self.pick, self.mode, self.buf = {"term": item, "sel": 0}, "folders", ""
+        self._search()
+
+    def _search(self):
+        self.matches = folders.search(self.folders, self.buf, short_path)
+        self.pick["sel"] = 0
+
+    async def start_session(self, term, path):
+        """Type `cd <folder> && claude` into a free terminal, give it the
+        session profile, and go there. Only into a pane that is still at a
+        bare shell; Ctrl-U first clears anything typed at its prompt."""
+        info = {sid: (profile, job) for sid, _, profile, _, job in await self.bridge.pane_info()}
+        profile, job = info.get(term["pane"], (None, None))
+        s = self.bridge.session(term["pane"])
+        if s is None or (job or "").lstrip("-") not in SHELLS:
+            self.flash(f"The terminal {term['tty']} is not at a shell prompt any more: nothing started.")
+            return
+        await s.async_send_text(f"\x15cd {shlex.quote(path)} && {self.cfg['new_session_command']}\r")
+        if profile == self.cfg["free_profile"]:
+            await self.bridge.set_profile(term["pane"], self.cfg["session_profile"])
+        store.log(f"new session in {short_path(path)} ({term['tty']})")
+        self.sel = None
+        await self.bridge.go(term["pane"], zoom=self.cfg["zoom"])
 
     def _update_selected(self, fn, done_text):
         sec, item = self.selected()
@@ -782,9 +824,9 @@ class App:
             elif key == "\x1b":
                 self.sel = None
             elif key == "n":
-                await self.go_terminal()
+                await self.pick_folder()
             elif sec == "terminals" and key in ("s", "p", "d", "u", "r"):
-                self.flash("A free terminal: Enter goes to it.")
+                self.flash("A free terminal: Enter starts a new session in it.")
             elif key == "s" and item:
                 if sec == "working":
                     self.flash("It is working now; nothing to snooze.")
@@ -850,6 +892,25 @@ class App:
                 self.buf = self.buf[:-1]
             elif key.isprintable():
                 self.buf += key
+        elif self.mode == "folders":
+            # Every letter goes into the search, n and q too; only Esc leaves.
+            term, n = self.pick["term"], len(self.matches)
+            if key == "\x1b":
+                self.mode = "main"
+            elif key in ("\x1b[A", "\x1bOA", "\x1b[B", "\x1bOB") and n:
+                self.pick["sel"] = (self.pick["sel"] + (-1 if key[-1] == "A" else 1)) % n
+            elif key in ("\r", "\n") and n:
+                self.mode = "main"
+                await self.start_session(term, self.matches[self.pick["sel"]][0])
+            elif key == "\t":
+                self.mode = "main"
+                await self.go_terminal(term)
+            elif key in ("\x7f", "\b", "\x15"):
+                self.buf = "" if key == "\x15" else self.buf[:-1]
+                self._search()
+            elif key.isprintable():
+                self.buf += key
+                self._search()
         self.wake.set()
 
     # ---- render -----------------------------------------------------------
@@ -976,6 +1037,34 @@ class App:
         left = f" {fg(P['text'])}{B}CLAUDE FOCUS{R}"
         return left + " " * max(1, w - width(left) - width(right) - 1) + right + " "
 
+    def _folder_lines(self, w, room):
+        """The folder picker: what the user typed, then the matching folders
+        with the matched letters bright, and when a session last ran there.
+        The list scrolls to keep the selected folder in view."""
+        P, acc, term = self.pal, self.pal["terminals"], self.pick["term"]
+        dim = fg(P["dim"])
+        lines = [self.section_title("terminals", f"NEW SESSION IN {term['tty']}", len(self.matches), w)]
+        hint = "" if self.buf else f"   {dim}type to search: a folder name, or its first letters{R}"
+        lines.append(f"  {fg(acc)}{B}›{R} {fg(P['text'])}{self.buf}{R}{fg(acc)}█{R}{hint}")
+        if not self.matches:
+            return lines + [f"  {dim}No folder matches.{R}"]
+        sel, show = self.pick["sel"], max(1, room - len(lines))
+        start = sel - show + 1 if sel >= show else 0
+        shown = self.matches[start:start + show]
+        texts = [short_path(p) for p, _, _ in shown]
+        pw = min(max(map(len, texts)), w - 20)
+        now = time.time()
+        for n, ((_, when, used), text) in enumerate(zip(shown, texts)):
+            selected = start + n == sel
+            text = look.cut_left(text, pw)
+            hit, tone = folders.marks(text, self.buf), fg(P["text"] if selected else P["soft"])
+            body = "".join(f"{fg(acc)}{B}{c}{R}" if i in hit else f"{tone}{c}{R}" for i, c in enumerate(text))
+            age = "no recent session" if not used else "now" if now - when < 60 else \
+                f"{fmt_wait((now - when) / 3600)} ago"
+            line = (f"{fg(acc)}▌{R} " if selected else "  ") + look.pad(body, pw) + f"  {dim}{age}{R}"
+            lines.append(look.on(line, mix(acc, P["bg"], 0.16), w) if selected else line)
+        return lines
+
     def render(self):
         cols, rows_n = shutil.get_terminal_size((100, 40))
         w = max(50, cols - 1)
@@ -1001,14 +1090,17 @@ class App:
         bottom_lines += [self._keys_line(now),
                          f"  {fg(P['working'])}{self.msg}{R}" if self.msg and time.time() < self.msg_until else ""]
 
+        room = max(3, rows_n - len(top_lines) - len(bottom_lines) - 1)
         # The rows keep their places: the selection changes only the highlight.
         sec, item = self.selected()
         list_lines, sel_line = [], None
-        if not self.rows():
+        if self.mode == "folders":
+            list_lines = self._folder_lines(w, room)
+        elif not self.rows():
             list_lines += [f"  {fg(P['dim'])}No Claude sessions and no free terminal.{R}"]
         elif not v.get("need") and not v.get("todo"):
             list_lines += [f"  {fg(P['terminals'])}{B}✓ Nothing needs you now.{R}"]
-        for key, title in SECTIONS:
+        for key, title in SECTIONS if self.mode != "folders" else ():
             if not v.get(key):
                 continue
             if list_lines:
@@ -1018,7 +1110,6 @@ class App:
                 if i is item:
                     sel_line = len(list_lines)
                 list_lines.append(self.row(key, i, w, selected=i is item))
-        room = max(3, rows_n - len(top_lines) - len(bottom_lines) - 1)
         start = 0
         if len(list_lines) > room and sel_line is not None and sel_line >= room - 1:
             start = min(sel_line - room + 2, len(list_lines) - room)
@@ -1053,7 +1144,11 @@ class App:
                     f"YYYY-MM-DD HH:MM){R}  {fg(P['text'])}{self.buf}█{R}")
         if self.mode == "priority":
             return f"  {fg(P['need'])}{B}Priority{R} {fg(P['dim'])}1-100 (0 = automatic){R}  {fg(P['text'])}{self.buf}█{R}"
-        keys = [("⏎", "go"), ("↑↓", "select"), ("esc", "top"), ("n", "free terminal"), ("s", "snooze"),
+        if self.mode == "folders":
+            return "  " + "   ".join([self._key("⏎", f"cd there and run {self.cfg['new_session_command']}"),
+                                     self._key("↑↓", "select"), self._key("⇥", "just go to the terminal"),
+                                     self._key("esc", "cancel")])
+        keys = [("⏎", "go"), ("↑↓", "select"), ("esc", "top"), ("n", "new session"), ("s", "snooze"),
                 ("u", "unwait"), ("p", "priority"), ("d", "done"), ("r", "rescore"), ("q", "quit")]
         if self.cfg.get("hotkeys"):
             hk = self.cfg["hotkey_go"].replace("ctrl", "⌃").replace("option", "⌥").replace("+", "").upper()

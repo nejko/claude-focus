@@ -2,6 +2,7 @@ import contextlib
 import io
 import os
 import re
+import time
 import unittest
 from unittest import mock
 
@@ -225,6 +226,13 @@ class TerminalTest(unittest.TestCase):
                       ("todo", "ttys004", "TODO", "/x", "zsh"),
                       ("taken", "ttys012", "Available", "/y", "2.1.304")]
         self.app.bridge.pane_info = mock.AsyncMock(return_value=self.panes)
+        self.app.bridge.set_profile = mock.AsyncMock()
+        self.app.bridge.session.return_value.async_send_text = mock.AsyncMock()
+        now = time.time()
+        found = [("/Users/ana/quantum notes", now - 7200, True), ("/Users/ana/Projects/api", now - 86400, False)]
+        patcher = mock.patch.object(appmod.folders, "candidates", return_value=found)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.app.sessions = [{"pid": 7, "sessionId": "c", "key": "c", "tty": "ttys012"},
                              {"pid": 8, "sessionId": "bg", "key": "bg", "tty": ""}]
 
@@ -253,14 +261,68 @@ class TerminalTest(unittest.TestCase):
                 await self.app.on_key(k)
         asyncio.run(run())
 
-    def test_enter_on_a_terminal_row_goes_to_its_pane(self):
+    def test_enter_on_a_terminal_row_opens_the_folder_picker(self):
         self.keys("\r", sel="pane:p9")
-        self.app.bridge.go.assert_awaited_once_with("p9", zoom=True)
-        self.assertIsNone(self.app.sel)
+        self.assertEqual((self.app.mode, self.app.pick["term"]["pane"]), ("folders", "p9"))
+        self.app.bridge.go.assert_not_awaited()
 
-    def test_n_goes_to_the_first_free_terminal(self):
+    def test_n_opens_the_picker_for_the_first_free_terminal(self):
         self.keys("n")
+        self.assertEqual((self.app.mode, self.app.pick["term"]["pane"]), ("folders", "p2"))
+
+    def test_tab_in_the_picker_just_goes_to_the_terminal(self):
+        self.keys("\r", "\t", sel="pane:p9")
+        self.app.bridge.go.assert_awaited_once_with("p9", zoom=True)
+        self.assertEqual(self.app.mode, "main")
+        self.app.bridge.session.return_value.async_send_text.assert_not_awaited()
+
+    def test_typing_searches_and_enter_starts_claude_in_that_folder(self):
+        # n and q are letters of the search here, not keys.
+        self.keys("n", "q", "n", "\r")
+        typed = self.app.bridge.session.return_value.async_send_text
+        typed.assert_awaited_once_with("\x15cd '/Users/ana/quantum notes' && claude\r")
+        self.app.bridge.session.assert_called_with("p2")
+        self.app.bridge.set_profile.assert_awaited_once_with("p2", "Default")
         self.app.bridge.go.assert_awaited_once_with("p2", zoom=True)
+        self.assertEqual(self.app.mode, "main")
+
+    def test_the_command_comes_from_the_config(self):
+        self.app.cfg = dict(self.app.cfg, new_session_command="claude --model opus")
+        self.keys("n", "\x1b[B", "\r")  # ↓: the second folder
+        self.app.bridge.session.return_value.async_send_text.assert_awaited_once_with(
+            "\x15cd /Users/ana/Projects/api && claude --model opus\r")
+
+    def test_nothing_is_typed_when_the_pane_is_no_longer_at_a_shell(self):
+        self.keys("n")
+        self.app.bridge.pane_info = mock.AsyncMock(return_value=[("p2", "ttys002", "Available", "/x", "vim")])
+        self.keys("\r")
+        self.app.bridge.session.return_value.async_send_text.assert_not_awaited()
+        self.app.bridge.go.assert_not_awaited()
+        self.assertIn("not at a shell prompt", self.app.flash.call_args[0][0])
+
+    def test_backspace_ctrl_u_and_esc(self):
+        self.keys("n", "q", "x")
+        self.assertEqual(self.app.matches, [])
+        self.keys("\x7f")
+        self.assertEqual([p for p, _, _ in self.app.matches], ["/Users/ana/quantum notes"])
+        self.keys("\x15")
+        self.assertEqual((self.app.buf, len(self.app.matches)), ("", 2))
+        self.keys("\x1b")
+        self.assertEqual(self.app.mode, "main")
+
+    def test_picker_screen(self):
+        self.keys("n", "q", "n")
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"COLUMNS": "120", "LINES": "30"}), contextlib.redirect_stdout(out):
+            self.app.last_frame = None
+            self.app.render()
+        screen = [ANSI.sub("", x) for x in out.getvalue().replace("\033[K", "").split("\n")]
+        self.assertTrue(any("NEW SESSION IN ttys002" in x for x in screen))
+        self.assertTrue(any(x.startswith("▌ /Users/ana/quantum notes") and "ago" in x for x in screen))
+        self.assertTrue(any("› qn" in x for x in screen))
+        self.assertTrue(any("cd there and run claude" in x for x in screen))
+        self.assertFalse(any("NEED YOU" in x for x in screen))
+        self.assertTrue(all(len(x) <= 119 for x in screen))
 
     def test_n_without_a_free_terminal(self):
         self.app.bridge.pane_info = mock.AsyncMock(return_value=[])
