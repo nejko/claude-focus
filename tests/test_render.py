@@ -9,7 +9,7 @@ from unittest import mock
 import _env  # noqa: E402,F401  (first: a scratch CLAUDE_FOCUS_DIR)
 
 from claude_focus import app as appmod  # noqa: E402
-from claude_focus import look  # noqa: E402
+from claude_focus import iterm, look  # noqa: E402
 
 STAMP = 1790915096936
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
@@ -82,6 +82,14 @@ class LayoutTest(unittest.TestCase):
         screen = self.screen(items, "s39", lines=30)
         self.assertIn("s39", self.rows_at(screen, ["s39"]))
         self.assertTrue(any("more lines" in x for x in self.screen(items, "s00", lines=30)))
+
+    def test_the_keys_are_the_last_line_of_the_screen(self):
+        for items in ([self.short], [need(f"s{n:02}", "Short?") for n in range(40)]):
+            screen = self.screen(items, lines=30)
+            self.assertEqual(len(screen), 30)
+            self.assertIn("go", screen[-1])
+            self.assertIn("select", screen[-1])
+            self.assertTrue(screen[-2].startswith("─"))
 
     def test_a_score_of_an_earlier_state_is_not_shown(self):
         # claude-focus-f3, 2026-10-13 10:28: the score named the question the user
@@ -217,17 +225,18 @@ class TerminalTest(unittest.TestCase):
 
     def setUp(self):
         self.app = appmod.App(None)
-        self.app.bridge = mock.Mock()
+        self.app.bridge = iterm.Bridge(None)
         self.app.bridge.go = mock.AsyncMock(return_value=True)
         self.app.flash = mock.Mock()
-        self.panes = [("own", "ttys000", "Available", "/Users/ana", "Python"),
-                      ("p9", "ttys009", "Available", os.path.expanduser("~"), "zsh"),
+        self.panes = [("own", "ttys000", "Available", "/Users/ana", "Python"),  # as pane_info sorts them
                       ("p2", "ttys002", "Available", os.path.expanduser("~/Projects/x"), "zsh"),
                       ("todo", "ttys004", "TODO", "/x", "zsh"),
+                      ("p9", "ttys009", "Available", os.path.expanduser("~"), "zsh"),
                       ("taken", "ttys012", "Available", "/y", "2.1.304")]
         self.app.bridge.pane_info = mock.AsyncMock(return_value=self.panes)
+        self.app.bridge.panes = {"ttys012": "taken"}
         self.app.bridge.set_profile = mock.AsyncMock()
-        self.app.bridge.session.return_value.async_send_text = mock.AsyncMock()
+        self.app.bridge.send_text = mock.AsyncMock(return_value=True)
         now = time.time()
         found = [("/Users/ana/quantum notes", now - 7200, True), ("/Users/ana/Projects/api", now - 86400, False)]
         patcher = mock.patch.object(appmod.folders, "candidates", return_value=found)
@@ -238,7 +247,7 @@ class TerminalTest(unittest.TestCase):
 
     def free(self):
         import asyncio
-        with mock.patch.object(appmod, "own_pane", return_value="own"):
+        with mock.patch.object(iterm, "own_pane", return_value="own"):
             return asyncio.run(self.app._free_terminals())
 
     def test_only_green_panes_without_a_claude_session(self):
@@ -274,14 +283,12 @@ class TerminalTest(unittest.TestCase):
         self.keys("\r", "\t", sel="pane:p9")
         self.app.bridge.go.assert_awaited_once_with("p9", zoom=True)
         self.assertEqual(self.app.mode, "main")
-        self.app.bridge.session.return_value.async_send_text.assert_not_awaited()
+        self.app.bridge.send_text.assert_not_awaited()
 
     def test_typing_searches_and_enter_starts_claude_in_that_folder(self):
         # n and q are letters of the search here, not keys.
         self.keys("n", "q", "n", "\r")
-        typed = self.app.bridge.session.return_value.async_send_text
-        typed.assert_awaited_once_with("\x15cd '/Users/ana/quantum notes' && claude\r")
-        self.app.bridge.session.assert_called_with("p2")
+        self.app.bridge.send_text.assert_awaited_once_with("p2", "\x15cd '/Users/ana/quantum notes' && claude\r")
         self.app.bridge.set_profile.assert_awaited_once_with("p2", "Default")
         self.app.bridge.go.assert_awaited_once_with("p2", zoom=True)
         self.assertEqual(self.app.mode, "main")
@@ -289,14 +296,14 @@ class TerminalTest(unittest.TestCase):
     def test_the_command_comes_from_the_config(self):
         self.app.cfg = dict(self.app.cfg, new_session_command="claude --model opus")
         self.keys("n", "\x1b[B", "\r")  # ↓: the second folder
-        self.app.bridge.session.return_value.async_send_text.assert_awaited_once_with(
-            "\x15cd /Users/ana/Projects/api && claude --model opus\r")
+        self.app.bridge.send_text.assert_awaited_once_with(
+            "p2", "\x15cd /Users/ana/Projects/api && claude --model opus\r")
 
     def test_nothing_is_typed_when_the_pane_is_no_longer_at_a_shell(self):
         self.keys("n")
         self.app.bridge.pane_info = mock.AsyncMock(return_value=[("p2", "ttys002", "Available", "/x", "vim")])
         self.keys("\r")
-        self.app.bridge.session.return_value.async_send_text.assert_not_awaited()
+        self.app.bridge.send_text.assert_not_awaited()
         self.app.bridge.go.assert_not_awaited()
         self.assertIn("not at a shell prompt", self.app.flash.call_args[0][0])
 

@@ -2,7 +2,7 @@ import unittest
 
 import _env  # noqa: E402,F401  (first: a scratch CLAUDE_FOCUS_DIR)
 
-from claude_focus.screen import DRAFT, EMPTY, OTHER, prompt_state  # noqa: E402
+from claude_focus.screen import DRAFT, EMPTY, OTHER, prompt_state, strip_ansi  # noqa: E402
 
 RULE = "─" * 60
 FOOTER = "\x00\x00Opus\x005.5 | effort xhigh\n\x00\x00⏵⏵\x00bypass\x00permissions\x00on"
@@ -48,6 +48,37 @@ class PromptStateTest(unittest.TestCase):
 
     def test_shell(self):
         self.assertEqual(prompt_state("ana@mac ~ % "), OTHER)
+
+
+# Lines of a herdr screen read with its colors (pane.read, format ansi) of
+# Claude Code 2.1.306, 2026-10-21: herdr gives no cursor, the colors tell.
+GREY_RULE = "\x1b[0m\x1b[38;2;136;136;136m" + "─" * 60 + "\x1b[0m"
+HERDR_FOOTER = "  \x1b[0m\x1b[38;2;255;193;7m⏵⏵ auto mode on\x1b[0m\x1b[38;2;153;153;153m (shift+tab to cycle)\x1b[0m"
+
+
+class ColoredPromptTest(unittest.TestCase):
+    def state(self, line):
+        ansi = f"report\n{GREY_RULE}\n{line}\n{GREY_RULE}\n{HERDR_FOOTER}"
+        return prompt_state(strip_ansi(ansi), ansi=ansi)
+
+    def test_dim_suggestion_is_empty(self):
+        self.assertEqual(self.state('❯\xa0\x1b[0m\x1b[2mTry "fix typecheck errors"\x1b[0m'), EMPTY)
+
+    def test_typed_text_has_no_style(self):
+        self.assertEqual(self.state("❯\xa0hello draft"), DRAFT)
+
+    def test_grey_prompt_sign_and_empty_box(self):
+        self.assertEqual(self.state("\x1b[0m\x1b[38;2;153;153;153m❯\xa0\x1b[0m"), EMPTY)
+
+    def test_a_color_with_a_2_in_it_is_not_dim(self):
+        # 38;2;r;g;b: the 2 says "true color", not "dim"
+        self.assertEqual(self.state("❯ \x1b[38;2;200;200;200mtyped in grey\x1b[0m"), DRAFT)
+
+    def test_dim_ends_before_typed_text(self):
+        self.assertEqual(self.state("❯ \x1b[2mTry\x1b[22m typed"), DRAFT)
+
+    def test_strip_ansi(self):
+        self.assertEqual(strip_ansi(GREY_RULE + "\x1b]0;title\x07x"), "─" * 60 + "x")
 
 
 if __name__ == "__main__":

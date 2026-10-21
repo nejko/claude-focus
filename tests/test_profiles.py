@@ -9,7 +9,7 @@ from unittest import mock
 import _env  # noqa: E402,F401  (first: a scratch CLAUDE_FOCUS_DIR)
 
 from claude_focus import app as appmod  # noqa: E402
-from claude_focus import store  # noqa: E402
+from claude_focus import iterm, store  # noqa: E402
 
 
 class RecolorTest(unittest.TestCase):
@@ -19,7 +19,8 @@ class RecolorTest(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
         self.app = appmod.App(None)
-        self.app.bridge = mock.Mock()
+        self.app.bridge = iterm.Bridge(None)
+        self.app.bridge.panes = {"ttys001": "p1"}  # tty -> pane, as refresh() finds them
         self.app.bridge.set_profile = mock.AsyncMock(return_value=True)
         self.panes = {"p1": ["ttys001", "Default", "~", "2.1.304"]}
         self.app.bridge.pane_info = mock.AsyncMock(

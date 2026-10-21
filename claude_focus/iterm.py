@@ -1,8 +1,11 @@
 """iTerm2 bridge (Python API): find a Claude session's pane by tty, read its
-screen, bring it to the front with its pane maximized, and catch hotkeys."""
+screen, bring it to the front with its pane maximized, and catch hotkeys.
+herdr.py has the same methods for herdr."""
 import asyncio
 import json
 import os
+import re
+import subprocess
 
 import iterm2
 
@@ -18,6 +21,9 @@ def own_pane():
 
 
 class Bridge:
+    name, label = "iterm", "iTerm2"
+    profiles = restores = hotkeys = True  # colored profiles, window restore (restore.py), global hotkeys
+
     def __init__(self, connection):
         self.conn = connection
         self.app = None
@@ -25,9 +31,51 @@ class Bridge:
         # hides the other panes of its tab from the API, so panes are
         # remembered after the first time they are seen.
         self._known = {}
+        self.panes = {}  # tty -> iterm session id (the last refresh)
+        self.ttys = {}   # (pid, session id) -> tty, so ps runs once for each process
 
     async def start(self):
         self.app = await iterm2.async_get_app(self.conn)
+
+    def own_pane(self):
+        return own_pane()
+
+    async def refresh(self):
+        self.panes = await self.pane_map()
+
+    def tty_of(self, s):
+        if "tty" not in s:
+            proc = (s["pid"], s["sessionId"])  # a process keeps its tty
+            if proc not in self.ttys:
+                try:
+                    tty = subprocess.run(["ps", "-o", "tty=", "-p", str(s["pid"])],
+                                         capture_output=True, text=True).stdout.strip()
+                except OSError:
+                    tty = ""
+                if not tty:
+                    s["tty"] = ""
+                    return ""
+                self.ttys[proc] = tty
+            s["tty"] = self.ttys[proc]
+        return s["tty"]
+
+    def pane_of(self, s):
+        """The pane of a session: the one with the tty of its process."""
+        return self.panes.get(self.tty_of(s))
+
+    def user_pane(self):
+        """The active pane of the front iTerm window, while iTerm2 is the active app."""
+        app = self.app
+        w = app.current_window if app else None
+        if not w or app.app_active is False or not w.current_tab:
+            return None
+        cur = w.current_tab.current_session
+        return cur.session_id if cur is not None else None
+
+    @staticmethod
+    def is_free(profile, job, cfg):
+        """A free terminal: a pane that shows the green profile (config "free_profile")."""
+        return profile == cfg["free_profile"]
 
     def _visible(self):
         for w in self.app.terminal_windows:
@@ -87,9 +135,10 @@ class Bridge:
 
     async def pane_info(self):
         """(iterm session_id, tty, profile name, folder, program) for every pane
-        of the last pane_map(). One request per pane, all at once: about 2 ms
-        for 24 panes. The profile is the one the pane shows now (after a
-        "Change profile" key), which the profile object of the API does not say."""
+        of the last pane_map(), oldest pane (lowest tty) first. One request per
+        pane, all at once: about 2 ms for 24 panes. The profile is the one the
+        pane shows now (after a "Change profile" key), which the profile
+        object of the API does not say."""
         names = ["profileName", "path", "jobName"]
         panes = self.known_panes()
         replies = await asyncio.gather(*[iterm2.rpc.async_variable(self.conn, sid, [], names)
@@ -102,6 +151,7 @@ class Bridge:
                 continue  # the pane closed while we asked
             if len(values) == len(names):
                 out.append((sid, tty, *values))
+        out.sort(key=lambda p: int(re.sub(r"\D", "", p[1]) or 0))
         return out
 
     async def set_profile(self, sid, name):
@@ -158,6 +208,19 @@ class Bridge:
         await s.async_send_text("\r")
         return True, ""
 
+    async def send_text(self, sid, text):
+        """Type text as it is: control characters (\\x15, \\r) act as keys."""
+        s = self.session(sid)
+        if s is None:
+            return False
+        await s.async_send_text(text)
+        return True
+
+    async def open_window(self, command):
+        """A new iTerm2 window running command."""
+        await iterm2.Window.async_create(self.conn, command=command)
+        return True
+
     async def _maximized(self):
         state = await iterm2.MainMenu.async_get_menu_item_state(self.conn, MAXIMIZE)
         return state.checked
@@ -209,6 +272,21 @@ class Bridge:
         if s:
             await self.app.async_activate(raise_all_windows=False, ignoring_other_apps=True)
             await s.async_activate(select_tab=True, order_window_front=True)
+
+    async def watch_focus(self, sid, on_change):
+        await watch_focus(self.conn, self, sid, on_change)
+
+    async def watch_hotkeys(self, bindings):
+        await watch_hotkeys(self.conn, bindings)
+
+    async def watch_events(self, on_change):
+        """Nothing to watch: the poll finds new and closed panes."""
+
+    async def report(self, marks):
+        """iTerm2 has no place for the queue but the focus screen."""
+
+    async def notify(self, text):
+        """The caller prints text: `claude-focus go` runs in a terminal here."""
 
 
 async def watch_focus(conn, bridge, sid, on_change):

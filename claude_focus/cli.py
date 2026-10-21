@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 
-from . import store
+from . import store, terminal
 
 
 def print_queue(app):
@@ -34,12 +34,10 @@ def print_queue(app):
 def cmd_list():
     import asyncio
 
-    import iterm2
-
     from .app import App
 
-    async def run(conn):
-        app = App(conn)
+    async def run(bridge):
+        app = App(bridge)
         store.ensure()
         await app.bridge.start()
         await app.poll()
@@ -50,7 +48,51 @@ def cmd_list():
         await app.poll()
         print_queue(app)
 
-    iterm2.run_until_complete(run)
+    terminal.run(run)
+
+
+def cmd_go():
+    """Go to the session at the top of the queue (a herdr key runs this; in
+    iTerm2, the hotkey "hotkey_go" of a focus window does the same)."""
+    from .app import App
+
+    async def run(bridge):
+        app = App(bridge, passive=True)
+        app.cfg["return_after_answer"] = False  # this process ends at once; the focus window watches
+        store.ensure()
+        await bridge.start()
+        await app.poll()
+        if app.selected() == (None, None):
+            app.flash("Nothing needs you now.")
+        else:
+            await app.go_top()
+        if app.msg:
+            print(app.msg)
+            await bridge.notify(app.msg)
+
+    terminal.run(run)
+
+
+def cmd_show():
+    """Bring the focus screen to the front, or open one."""
+    from .app import show_focus
+
+    async def run(bridge):
+        await bridge.start()
+        await bridge.refresh()
+        await show_focus(bridge)
+
+    terminal.run(run)
+
+
+def _herdr_keeps_layout(command):
+    """True (and says so) when the sessions run in herdr: its server keeps
+    every pane and resumes the Claude sessions in them after a restart."""
+    if terminal.detect() != terminal.HERDR:
+        return False
+    print(f"claude-focus {command}: your sessions run in herdr, which keeps its layout and resumes "
+          "the Claude sessions in it after a restart. Nothing to do here.")
+    return True
 
 
 PENDING_HELP = """claude-focus pending: wait for something external without {user}.
@@ -162,6 +204,8 @@ def cmd_restore(argv):
     ap.add_argument("--dry-run", action="store_true", help="only show what it would open")
     ap.add_argument("--yes", action="store_true", help="do not ask before opening")
     a = ap.parse_args(argv)
+    if _herdr_keeps_layout("restore"):
+        return
     snap = restore.previous_layout(restore.read_history(), restore.iterm_run())
     if not snap:
         print("No saved layout of an earlier iTerm2 run.")
@@ -208,6 +252,8 @@ def cmd_reboot(argv):
     ap.add_argument("--dry-run", action="store_true", help="only show what it would save")
     ap.add_argument("--yes", action="store_true", help="do not ask")
     a = ap.parse_args(argv)
+    if _herdr_keeps_layout("reboot"):
+        return
 
     async def run(conn):
         bridge = Bridge(conn)
@@ -256,26 +302,22 @@ LABEL = "com.claude-focus.service"
 PLIST = os.path.expanduser(f"~/Library/LaunchAgents/{LABEL}.plist")
 
 
-def iterm_running():
-    """From ps (pgrep sees no processes in some sandboxes)."""
-    out = subprocess.run(["ps", "-axo", "comm"], capture_output=True, text=True).stdout
-    return any(line.rstrip().endswith("/MacOS/iTerm2") for line in out.splitlines())
+iterm_running = terminal.iterm_running
 
 
 def cmd_daemon():
-    """The background service (launchd runs this). It waits for iTerm2, then
-    runs the engine: scoring, waker, hotkeys. When iTerm2 quits, it exits and
-    launchd starts it again."""
-    import iterm2
-
+    """The background service (launchd runs this). It waits for a terminal
+    (terminal.detect: herdr or iTerm2), then runs the engine: scoring, waker,
+    hotkeys. When that terminal quits, or the sessions move to the other one,
+    it exits and launchd starts it again."""
     from .app import App
 
     store.ensure()
-    while not iterm_running():  # never let AppleScript start iTerm2
+    while not (kind := terminal.detect()):  # never let AppleScript start iTerm2
         time.sleep(20)
-    store.log(f"service start (pid {os.getpid()})")
+    store.log(f"service start in {kind} (pid {os.getpid()})")
     try:
-        iterm2.run_until_complete(lambda conn: App(conn, headless=True).run_headless())
+        terminal.run(lambda bridge: App(bridge, headless=True).run_headless(), kind)
     finally:
         store.log(f"service stop (pid {os.getpid()})")
 
@@ -339,6 +381,7 @@ def cmd_uninstall_daemon():
 
 
 def cmd_service_status():
+    print(f"terminal: {terminal.describe(terminal.detect())}")
     r = _launchctl("print", f"gui/{os.getuid()}/{LABEL}")
     if r.returncode != 0:
         print("Service not installed.")
@@ -355,6 +398,10 @@ def main():
         tui()
     elif args[0] == "list":
         cmd_list()
+    elif args[0] == "go":
+        cmd_go()
+    elif args[0] == "show":
+        cmd_show()
     elif args[0] == "pending":
         cmd_pending(args[1:])
     elif args[0] == "hook":
@@ -381,6 +428,7 @@ def main():
         from . import setup
         setup.uninstall(purge="--purge" in args)
     else:
-        print("usage: claude-focus [setup [--yes] [--dry-run] | uninstall [--purge] | list | pending --help | "
-              "restore [--dry-run] | reboot [--dry-run] | cost | status | install-daemon | uninstall-daemon]")
+        print("usage: claude-focus [setup [--yes] [--dry-run] | uninstall [--purge] | list | go | show | "
+              "pending --help | restore [--dry-run] | reboot [--dry-run] | cost | status | install-daemon | "
+              "uninstall-daemon]")
         sys.exit(2)

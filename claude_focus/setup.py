@@ -4,15 +4,18 @@ setup can run again at any time (after an upgrade it restarts the service on
 the new code).
 
 setup:
- 1. checks: macOS, iTerm2, `claude` on PATH, where this command lives
- 2. the iTerm2 Python API (macOS asks once whether this program may
-    control iTerm2)
+ 1. checks: macOS, the terminal (herdr or iTerm2, see terminal.detect),
+    `claude` on PATH, where this command lives
+ 2. the terminal's API: herdr's socket, or the iTerm2 Python API (macOS asks
+    once whether this program may control iTerm2)
  3. ~/.claude-focus/config.json: your name
  4. the UserPromptSubmit hook in ~/.claude/settings.json
  5. the rule for waits in ~/.claude/CLAUDE.md
- 6. free terminals: a green iTerm2 profile, switched automatically (optional)
+ 6. free terminals: in iTerm2 a green profile, switched automatically
+    (optional); in herdr every pane at a bare shell. herdr only: its Claude
+    Code integration, and two herdr keys (go to the top, show the focus screen)
  7. the background service: installed, or restarted on the new code
- 8. the focus screen in a new iTerm2 window
+ 8. the focus screen in a new iTerm2 window or herdr tab
 
 uninstall undoes 4 to 7, and with --purge also removes ~/.claude-focus.
 Files it changes get a backup next to them the first time."""
@@ -21,12 +24,14 @@ import io
 import json
 import os
 import pwd
+import re
+import shlex
 import shutil
 import subprocess
 import sys
 import time
 
-from . import store
+from . import herdr, store, terminal
 
 CLAUDE_DIR = os.path.expanduser("~/.claude")
 SETTINGS = os.path.join(CLAUDE_DIR, "settings.json")
@@ -34,14 +39,17 @@ CLAUDE_MD = os.path.join(CLAUDE_DIR, "CLAUDE.md")
 PROFILES_DIR = os.path.expanduser("~/Library/Application Support/iTerm2/DynamicProfiles")
 PROFILE_FILE = os.path.join(PROFILES_DIR, "claude-focus.json")
 PROFILE_GUID = "719CE515-5BA5-45D6-880C-834DB5E01564"  # fixed: setup and uninstall find it again
+HERDR_CONFIG = os.path.expanduser(os.environ.get("HERDR_CONFIG_PATH") or "~/.config/herdr/config.toml")
 RULE_FILE = os.path.join(os.path.dirname(__file__), "claude_md_rule.md")
 HOOK_TAG = "claude-focus hook prompt-submit"
 RULE_TAG = "claude-focus pending"  # any CLAUDE.md that mentions it has a rule already
 MARK_START = "<!-- claude-focus setup: start (claude-focus uninstall removes this block) -->"
 MARK_END = "<!-- claude-focus setup: end -->"
+KEYS_START = "# claude-focus setup: start (claude-focus uninstall removes this block)"
+KEYS_END = "# claude-focus setup: end"
 BACKUP = ".before-claude-focus"
 GREEN_DARK, GREEN_LIGHT = (24, 97, 29), (205, 240, 205)
-SERVICE_WAIT = 30  # seconds to wait for the service to reach iTerm2
+SERVICE_WAIT = 30  # seconds to wait for the service to reach the terminal
 
 
 # ---- pure parts (tested) ----------------------------------------------------
@@ -85,13 +93,34 @@ def add_rule(text, rule):
     return f"{head}{MARK_START}\n\n{rule.strip()}\n\n{MARK_END}\n", True
 
 
-def remove_rule(text):
+def remove_rule(text, mark_start=MARK_START, mark_end=MARK_END):
     """CLAUDE.md text without the block that setup added. Returns (text, changed)."""
-    start, end = text.find(MARK_START), text.find(MARK_END)
+    start, end = text.find(mark_start), text.find(mark_end)
     if start < 0 or end < start:
         return text, False
-    before, after = text[:start].rstrip(), text[end + len(MARK_END):].lstrip("\n")
+    before, after = text[:start].rstrip(), text[end + len(mark_end):].lstrip("\n")
     return (before + "\n\n" + after if before and after else before + "\n" if before else after), True
+
+
+def herdr_keys(command, go, show):
+    """The block of herdr key bindings (herdr's config.toml) that setup adds:
+    custom commands of type "shell" run detached."""
+    def binding(key, args):
+        line = json.dumps(f"{shlex.quote(command)} {args}")  # a JSON string is a TOML basic string
+        return f'[[keys.command]]\nkey = {json.dumps(key)}\ntype = "shell"\ncommand = {line}\n'
+    return f"{KEYS_START}\n{binding(go, 'go')}\n{binding(show, 'show')}{KEYS_END}\n"
+
+
+def add_herdr_keys(text, block):
+    """herdr's config.toml with the block at the end. Returns (text, changed)."""
+    if KEYS_START in text:
+        return text, False
+    head = text.rstrip() + "\n\n" if text.strip() else ""
+    return head + block, True
+
+
+def remove_herdr_keys(text):
+    return remove_rule(text, KEYS_START, KEYS_END)
 
 
 def _color(rgb):
@@ -173,15 +202,23 @@ class Setup:
 
     # 1
     def checks(self):
+        """Returns the terminal: terminal.HERDR or terminal.ITERM."""
         if sys.platform != "darwin":
-            sys.exit("claude-focus needs macOS and iTerm2.")
-        if not os.path.exists("/Applications/iTerm.app") and not _iterm_running():
-            sys.exit("iTerm2 is not installed (https://iterm2.com). Install it, then run setup again.")
-        if not _iterm_running():
-            self.change("start iTerm2")
-            if not self.dry_run:
-                subprocess.run(["open", "-a", "iTerm"])
-                time.sleep(3)
+            sys.exit("claude-focus needs macOS, and herdr or iTerm2.")
+        kind = terminal.detect()
+        if kind is None:
+            if os.path.exists("/Applications/iTerm.app"):
+                self.change("start iTerm2")
+                if not self.dry_run:
+                    subprocess.run(["open", "-a", "iTerm"])
+                    time.sleep(3)
+                kind = terminal.ITERM
+            elif shutil.which("herdr"):
+                sys.exit("herdr does not run. Start herdr, then run `claude-focus setup` in one of its panes.")
+            else:
+                sys.exit("claude-focus needs herdr (https://herdr.dev) or iTerm2 (https://iterm2.com). "
+                         "Install one, then run setup again.")
+        self.done(f"terminal: {terminal.describe(kind)}")
         self.done(f"command: {command_path()}")
         if not shutil.which("claude-focus"):
             self.warn("claude-focus is not on your PATH. With uv, run `uv tool update-shell` and open "
@@ -192,6 +229,21 @@ class Setup:
             self.warn("`claude` is not on PATH: the scorer runs `claude -p`. Install Claude Code, or run "
                       "setup from a shell where `claude` works.")
             self.todo.append("Make `claude` available on PATH, then run `claude-focus setup` again.")
+        return kind
+
+    # 2 (herdr)
+    def herdr_api(self, path):
+        pong = herdr.ping(path)
+        if not pong:
+            self.warn(f"herdr does not answer at {path}. Start herdr (or set herdr_socket in {store.CONFIG}), "
+                      "then run `claude-focus setup` again.")
+            self.todo.append("Start herdr, then run `claude-focus setup` again in one of its panes.")
+            return False
+        self.done(f"herdr {pong.get('version')} API: connected ({path})")
+        if pong.get("protocol") != herdr.PROTOCOL:
+            self.warn(f"herdr speaks API protocol {pong.get('protocol')}; claude-focus was written for "
+                      f"{herdr.PROTOCOL} (herdr 0.9.5), so some of it may not work")
+        return True
 
     # 2
     def iterm_api(self):
@@ -283,8 +335,55 @@ class Setup:
             store.ensure()
             store._write(store.CONFIG, dict(store._read(store.CONFIG, {}), **update))
 
+    # 6 (herdr)
+    def herdr_integration(self, path):
+        """herdr's Claude Code hook tells herdr the session id in each pane:
+        claude-focus then finds a session's pane even when its process is not
+        in the foreground (without it, by its process only)."""
+        found = herdr.call(path, "integration.list") or {}
+        state = next((i.get("state") for i in found.get("integrations", []) if i.get("target") == "claude"), None)
+        if state == "current":
+            self.done("herdr's Claude Code integration: installed")
+            return
+        if not self.confirm("Install herdr's Claude Code integration (a SessionStart hook in "
+                            "~/.claude/settings.json that tells herdr the session in each pane)?", True):
+            self.done("herdr's Claude Code integration: not installed (sessions are found by their process)")
+            return
+        self.change("install herdr's Claude Code integration (herdr integration install claude)")
+        if not self.dry_run and herdr.call(path, "integration.install", {"target": "claude"}) is None:
+            self.warn("herdr did not install its Claude Code integration")
+            self.todo.append("Run `herdr integration install claude`.")
+
+    def herdr_keys(self, path):
+        cfg = store.load_config()
+        go, show = cfg["herdr_key_go"], cfg["herdr_key_focus_window"]
+        text = open(HERDR_CONFIG).read() if os.path.exists(HERDR_CONFIG) else ""
+        what = f"{go} goes to the session that needs you most, {show} shows the focus screen"
+        if KEYS_START in text:
+            self.done(f"herdr keys: {what}")
+            return
+        taken = [k for k in (go, show) if json.dumps(k) in text]
+        if taken:
+            self.warn(f"herdr keys not added: {', '.join(taken)} already bound in {HERDR_CONFIG}. Set "
+                      f"herdr_key_go and herdr_key_focus_window in {store.CONFIG}, then run setup again.")
+            return
+        if not self.confirm(f"Add two herdr keys? {go}: go to the session that needs you most; "
+                            f"{show}: show the focus screen", True):
+            self.done("herdr keys: not added (run setup again to add them)")
+            return
+        block = herdr_keys(command_path(), go, show)
+        if os.path.islink(HERDR_CONFIG):  # managed elsewhere (Nix, dotfiles): a write would replace the link
+            self.warn(f"{HERDR_CONFIG} is a link, so setup does not change it. Add these keys where it "
+                      f"comes from, then reload herdr's config:\n\n{block}")
+            self.todo.append("Add the herdr keys that setup printed to your herdr config.")
+            return
+        self.change(f"add the herdr keys to {HERDR_CONFIG}: {what}")
+        self.write(HERDR_CONFIG, add_herdr_keys(text, block)[0])
+        if not self.dry_run and herdr.call(path, "server.reload_config") is None:
+            self.warn("herdr did not reload its config: reload it in herdr (prefix+shift+r)")
+
     # 7
-    def service(self):
+    def service(self, kind):
         from . import cli
         if self.dry_run:
             self.change("install the background service" if not os.path.exists(cli.PLIST)
@@ -299,40 +398,52 @@ class Setup:
             self.todo.append("Run `claude-focus install-daemon` and check its message.")
             return
         self.change(f"background service {cli.LABEL} installed and started")
-        print("    (macOS may ask once more whether the service may control iTerm2: allow it)")
+        if kind == terminal.ITERM:
+            print("    (macOS may ask once more whether the service may control iTerm2: allow it)")
         deadline = time.time() + SERVICE_WAIT
         while time.time() < deadline:
-            if "service connected to iTerm2" in _log_since(before):
-                self.done("the service reached iTerm2")
+            m = re.search(r"service connected to (\S+)", _log_since(before))
+            if m:
+                self.done(f"the service reached {m.group(1)}")
                 return
             time.sleep(1)
-        self.warn(f"the service did not reach iTerm2 within {SERVICE_WAIT} s; see {store.LOG} and "
+        self.warn(f"the service did not reach a terminal within {SERVICE_WAIT} s; see {store.LOG} and "
                   f"{os.path.join(store.DIR, 'service.log')}")
-        self.todo.append("Check why the service does not reach iTerm2 (focus.log, service.log).")
+        self.todo.append("Check why the service does not reach the terminal (focus.log, service.log).")
 
     # 8
-    def focus_window(self, api, info):
+    def focus_window(self, kind, api, info):
+        where = "herdr tab" if kind == terminal.HERDR else "iTerm2 window"
         if info.get("focus_running"):
             self.done("the focus screen is open")
         elif self.dry_run:
-            self.change("open the focus screen in a new iTerm2 window")
-        elif api and _open_focus_window(command_path()):
-            self.change("opened the focus screen in a new iTerm2 window (keep it open)")
+            self.change(f"open the focus screen in a new {where}")
+        elif api and _open_focus_window(kind, command_path()):
+            self.change(f"opened the focus screen in a new {where} (keep it open)")
         else:
-            self.warn("the focus screen did not open: run `claude-focus` in a new iTerm2 window")
+            self.warn(f"the focus screen did not open: run `claude-focus` in a new {where}")
 
     def run(self):
         print("claude-focus setup" + (" (dry run: nothing changes)" if self.dry_run else ""))
-        self.checks()
-        api = self.iterm_api()
+        kind = self.checks()
+        path = herdr.socket_path()
+        api = self.herdr_api(path) if kind == terminal.HERDR else self.iterm_api()
         self.config()
         self.hook()
         self.rule()
-        info = _iterm_info() if api else {}
-        if api:
-            self.free_terminals(info)
-        self.service()
-        self.focus_window(api, info)
+        if kind == terminal.HERDR:
+            from .restore import focus_pane
+            info = {"focus_running": bool(focus_pane())}
+            self.done("free terminals: every herdr pane at a bare shell prompt")
+            if api:
+                self.herdr_integration(path)
+                self.herdr_keys(path)
+        else:
+            info = _iterm_info() if api else {}
+            if api:
+                self.free_terminals(info)
+        self.service(kind)
+        self.focus_window(kind, api, info)
         print()
         if self.todo:
             print("Still to do:")
@@ -367,6 +478,12 @@ def uninstall(purge=False):
     if os.path.exists(PROFILE_FILE):
         os.remove(PROFILE_FILE)
         print("  - the green iTerm2 profile removed")
+    if os.path.exists(HERDR_CONFIG):
+        text, changed = remove_herdr_keys(open(HERDR_CONFIG).read())
+        if changed:
+            _replace(HERDR_CONFIG, text)
+            herdr.call(herdr.socket_path(), "server.reload_config")
+            print(f"  - the herdr keys removed from {HERDR_CONFIG}")
     if purge:
         shutil.rmtree(store.DIR, ignore_errors=True)
         print(f"  - {store.DIR} removed")
@@ -447,7 +564,10 @@ def _wait_for_profile(name, seconds=5):
     return False
 
 
-def _open_focus_window(command):
+def _open_focus_window(kind, command):
+    if kind == terminal.HERDR:
+        import asyncio
+        return asyncio.run(herdr.Bridge().open_window(command))
     import iterm2
 
     async def open_window(conn):

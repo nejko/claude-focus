@@ -13,6 +13,7 @@ from . import ask, store
 
 USD_PER_INPUT_TOKEN = 0.042 / 1_000_000
 CREDENTIALS = os.path.expanduser("~/.config/claude-focus/credentials")
+OPENROUTER = "https://openrouter.ai/api"  # the SDK appends /v1/systemone
 
 # Lowest to highest. The share of the top level decides how high a session
 # ranks: priority = expected level / 4 * 100.
@@ -38,28 +39,40 @@ EFFORTS = {"1": "About 1 minute", "5": "About 5 minutes",
 _client = None
 
 
-def api_key():
-    key = os.environ.get("TYPESAFE_API_KEY")
+def credential(name):
+    """name from the environment, else from the credentials file."""
+    key = os.environ.get(name)
     if key:
         return key
     try:
         with open(CREDENTIALS) as f:
             for line in f:
-                if line.startswith("TYPESAFE_API_KEY="):
+                if line.startswith(name + "="):
                     return line.split("=", 1)[1].strip()
     except OSError:
         pass
     return None
 
 
+def api_key():
+    """(key, base URL). A TypeSafe key goes to TypeSafe (base URL None: the
+    SDK's default or TYPESAFE_BASE_URL); else an OpenRouter key goes to
+    OpenRouter's System One API, billed there at the same price."""
+    key = credential("TYPESAFE_API_KEY")
+    if key:
+        return key, None
+    key = credential("OPENROUTER_API_KEY")
+    return key, OPENROUTER if key else None
+
+
 def client(cfg):
     global _client
     if _client is None:
         from typesafe_sdk import AsyncTypeSafeClient, RetryPolicy
-        key = api_key()
+        key, base_url = api_key()
         if not key:
-            raise RuntimeError(f"no jev key: set TYPESAFE_API_KEY in {CREDENTIALS}")
-        _client = AsyncTypeSafeClient(api_key=key, model=cfg["jev_model"],
+            raise RuntimeError(f"no jev key: set TYPESAFE_API_KEY or OPENROUTER_API_KEY in {CREDENTIALS}")
+        _client = AsyncTypeSafeClient(api_key=key, base_url=base_url, model=cfg["jev_model"],
                                       retry=RetryPolicy(max_retries=3))
     return _client
 

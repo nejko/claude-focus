@@ -83,7 +83,8 @@ class SetupStepsTest(unittest.TestCase):
         self.d = d
         paths = {"SETTINGS": os.path.join(d, "claude", "settings.json"),
                  "CLAUDE_MD": os.path.join(d, "claude", "CLAUDE.md"),
-                 "PROFILE_FILE": os.path.join(d, "DynamicProfiles", "claude-focus.json")}
+                 "PROFILE_FILE": os.path.join(d, "DynamicProfiles", "claude-focus.json"),
+                 "HERDR_CONFIG": os.path.join(d, "herdr", "config.toml")}
         for name, value in paths.items():
             p = mock.patch.object(su, name, value)
             p.start()
@@ -153,6 +154,79 @@ class SetupStepsTest(unittest.TestCase):
         self.assertEqual(files[su.CLAUDE_MD], "# Mine\n")
         self.assertIsNone(files[su.PROFILE_FILE])
         self.assertIsNotNone(files[store.CONFIG])  # kept without --purge
+
+    def herdr_keys(self, answers=None):
+        s = su.Setup(yes=True)
+        out = io.StringIO()
+        reply = lambda path, method, params=None: answers or {}  # noqa: E731
+        with mock.patch.object(su.herdr, "call", side_effect=reply) as call, contextlib.redirect_stdout(out):
+            s.herdr_keys("/x/herdr.sock")
+        return out.getvalue(), [c.args[1] for c in call.call_args_list]
+
+    def test_herdr_keys_then_again_then_uninstall(self):
+        os.makedirs(os.path.dirname(su.HERDR_CONFIG))
+        mine = '[ui]\naccent = "#eb3f6c"\n\n[keys]\ndetach = ["prefix+q", "prefix+d"]\n'
+        with open(su.HERDR_CONFIG, "w") as f:
+            f.write(mine)
+        out, calls = self.herdr_keys()
+        self.assertEqual(calls, ["server.reload_config"])
+        text = open(su.HERDR_CONFIG).read()
+        self.assertTrue(text.startswith(mine))
+        self.assertIn('key = "prefix+a"\ntype = "shell"\ncommand = "/bin/claude-focus go"', text)
+        self.assertIn('key = "prefix+f"\ntype = "shell"\ncommand = "/bin/claude-focus show"', text)
+        out, calls = self.herdr_keys()
+        self.assertEqual((open(su.HERDR_CONFIG).read(), calls), (text, []))
+        self.assertIn("✓ herdr keys", out)
+        with mock.patch.object(cli, "cmd_uninstall_daemon"), mock.patch.object(su.herdr, "call"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            su.uninstall()
+        self.assertEqual(open(su.HERDR_CONFIG).read(), mine)
+
+    def test_a_linked_herdr_config_is_not_replaced(self):
+        os.makedirs(os.path.dirname(su.HERDR_CONFIG))
+        real = os.path.join(self.d, "dotfiles.toml")
+        with open(real, "w") as f:
+            f.write("[ui]\n")
+        os.symlink(real, su.HERDR_CONFIG)
+        out, calls = self.herdr_keys()
+        self.assertTrue(os.path.islink(su.HERDR_CONFIG))
+        self.assertEqual((open(real).read(), calls), ("[ui]\n", []))
+        self.assertIn('command = "/bin/claude-focus go"', out)
+
+    def test_herdr_keys_never_take_a_bound_key(self):
+        os.makedirs(os.path.dirname(su.HERDR_CONFIG))
+        with open(su.HERDR_CONFIG, "w") as f:
+            f.write('[keys]\nnew_tab = "prefix+a"\n')
+        out, calls = self.herdr_keys()
+        self.assertIn("prefix+a already bound", out)
+        self.assertEqual(open(su.HERDR_CONFIG).read(), '[keys]\nnew_tab = "prefix+a"\n')
+
+    def test_herdr_integration_is_installed_once(self):
+        s = su.Setup(yes=True)
+        states = {"integrations": [{"target": "claude", "state": "not_installed"}]}
+        with mock.patch.object(su.herdr, "call", return_value=states) as call, \
+                contextlib.redirect_stdout(io.StringIO()):
+            s.herdr_integration("/x/herdr.sock")
+        self.assertEqual(call.call_args_list[-1].args[1:], ("integration.install", {"target": "claude"}))
+        states["integrations"][0]["state"] = "current"
+        with mock.patch.object(su.herdr, "call", return_value=states) as call, \
+                contextlib.redirect_stdout(io.StringIO()):
+            s.herdr_integration("/x/herdr.sock")
+        self.assertEqual([c.args[1] for c in call.call_args_list], ["integration.list"])
+
+
+class HerdrKeysTest(unittest.TestCase):
+    def test_a_path_with_a_space_is_quoted(self):
+        block = su.herdr_keys("/Users/ana/My Tools/claude-focus", "prefix+a", "prefix+f")
+        self.assertIn("command = \"'/Users/ana/My Tools/claude-focus' go\"", block)
+
+    def test_add_and_remove_restore_the_text(self):
+        block = su.herdr_keys("/bin/claude-focus", "prefix+a", "prefix+f")
+        for text in ("", "[ui]\naccent = \"cyan\"\n"):
+            added, changed = su.add_herdr_keys(text, block)
+            self.assertTrue(changed)
+            self.assertEqual(su.add_herdr_keys(added, block), (added, False))
+            self.assertEqual(su.remove_herdr_keys(added), (text, True))
 
 
 if __name__ == "__main__":

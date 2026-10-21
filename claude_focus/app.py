@@ -1,28 +1,25 @@
 """The focus screen: every session in sections (the selected row, by default
 the one that needs the user most, is highlighted), the free terminals, and the
-keys. Runs in its own iTerm window. It also runs the waker for pending waits."""
+keys. Runs in its own iTerm window or herdr pane. It also runs the waker for
+pending waits. The terminal is behind a bridge (iterm.py, herdr.py)."""
 import asyncio
 import datetime as dt
 import json
 import os
-import re
 import shlex
 import shutil
-import subprocess
 import sys
 import termios
 import time
 import tty as ttymod
 
-import iterm2
-
 from . import costs, folders, look
 from . import pending as pend
 from . import queue as q
-from . import restore, scorer, sessions as sessions_mod, store
-from .iterm import Bridge, own_pane, watch_focus, watch_hotkeys
+from . import restore, scorer, sessions as sessions_mod, store, terminal
 from .look import B, R, bg, fg, fit, mix, width
 from .screen import EMPTY
+from .terminal import SHELLS
 
 FOCUS_BAR = "\033[1;30;42m"  # the title bar while this window has the keys: bold black on green
 STABLE_SECONDS = 15       # a status must hold this long before it is scored
@@ -36,8 +33,9 @@ SNAPSHOT_SECONDS = 10     # how often the engine saves the layout for a restore
 ANSWER_POLL = 0.4         # seconds between two looks at a dialog the user went to answer
 SEEN_WRITE_SECONDS = 30   # while the user stays in one pane, how often its "seen" time is written
 SEEN_KEEP_DAYS = 14
-SHELLS = {"zsh", "bash", "fish", "sh", "tcsh", "ksh", "nu"}
 ENDED_GRACE = 60          # seconds after a session ended in which its pane must be back at a bare shell
+EVENT_PAUSE = 0.3         # seconds: a burst of terminal events (watch_events) makes one poll
+TERMINAL_CHECK = 60       # seconds between two looks of the service at which terminal runs the sessions
 
 KIND_LABEL = {"decision": "decision", "action": "action", "login": "login",
               "review": "review", "info": "info", "nothing": "nothing"}
@@ -105,15 +103,16 @@ class App:
     """One class, two roles. The ENGINE (whoever holds the engine lock: the
     background service, or else the first focus window) scores sessions,
     runs the waker and owns the hotkeys. Every focus window is a VIEW of the
-    shared state. `headless` = the background service: engine only, no screen."""
+    shared state. `headless` = the background service: engine only, no screen.
+    `passive` = a one-off command (`claude-focus go`): a view, never the engine.
+    `bridge` = the terminal (iterm.Bridge or herdr.Bridge; see terminal.py)."""
 
-    def __init__(self, conn, headless=False):
-        self.conn = conn
+    def __init__(self, bridge, headless=False, passive=False):
         self.headless = headless
+        self.passive = passive
         self.cfg = store.load_config()
-        self.bridge = Bridge(conn)
+        self.bridge = bridge
         self.sessions = []
-        self.panes = {}           # tty -> iterm session id
         self.view = None
         self.scoring = set()      # state keys being scored now
         self.checking = set()     # session ids whose pending check runs now
@@ -128,6 +127,7 @@ class App:
         self.remote = {}          # the other engine's status (engine.json) when we are a view
         self.last_status = None
         self.wake = asyncio.Event()
+        self.poll_now = asyncio.Event()  # set by terminal events: poll before poll_seconds pass
         self.polled = False
         self.run_id = None        # start time of the running iTerm2 (the engine's run)
         self.snap_at = 0
@@ -140,10 +140,9 @@ class App:
         self.typed_check = {}     # session id -> the statusSince whose transcript was read (pending_tick)
         self.seen_sid = None      # the session whose pane had the user's keys at the last poll
         self.seen_written = 0     # Unix ms of the last write of state["seen"]
-        self.ttys = {}            # (pid, session id) -> tty, so ps runs once for each process
         self.terminals = []       # the free terminals (see _free_terminals); only a focus window reads them
         self.claude_panes = {}    # iterm session id -> (session name, Unix s last seen) of panes that ran a session
-        self.pal = look.DARK      # the colors of iTerm2's theme now
+        self.pal = look.DARK      # the colors of the terminal's theme now
         self.pick = None          # the folder picker: {"term": free terminal, "sel": row}
         self.folders = []         # its folders (see folders.candidates)
         self.matches = []         # the folders that match what the user typed (self.buf)
@@ -154,8 +153,8 @@ class App:
         rows = await asyncio.get_event_loop().run_in_executor(None, sessions_mod.list_sessions)
         if rows is not None:
             self.sessions = rows
-        self.panes = await self.bridge.pane_map()
-        if not self.headless:
+        await self.bridge.refresh()
+        if not self.headless and not self.passive:
             self.terminals = await self._free_terminals()
             self.pal = look.palette(await self.bridge.theme())
         # The service is the preferred engine. A focus window is the engine
@@ -164,13 +163,13 @@ class App:
             self.engine.close()
             self.engine = None
             store.log(f"engine handed to the service (window pid {os.getpid()})")
-        elif self.engine is None and (self.headless or not pend.service_alive()):
+        elif self.engine is None and not self.passive and (self.headless or not pend.service_alive()):
             self.engine = pend.take_engine_lock()
             if self.engine:
                 self._start_engine()
         if self.engine:
             self._note_seen()
-            if self.cfg["auto_profiles"]:
+            if self.cfg["auto_profiles"] and self.bridge.profiles:
                 try:
                     await self._recolor_panes()
                 except Exception as ex:  # never let it break the waker
@@ -182,18 +181,24 @@ class App:
             self._reset_skips(state)
             self._take_rescore_requests(state)
             await self.retry_wakeups(state)
-            await self._snapshot_tick(state)
+            if self.bridge.restores:
+                await self._snapshot_tick(state)
         self.view = q.classify(self.sessions, state, dt.datetime.now(), self.cfg)
         self.view["terminals"] = self.terminals
         if self.engine:
             self._schedule_scores(state)
             self._write_status()
+            if self.cfg["herdr_sidebar"]:
+                await self.bridge.report(self._marks())
         else:
             self._read_status()
         self.polled = True
 
     def _start_engine(self):
-        store.log(f"engine started ({'background service' if self.headless else 'focus window'}, pid {os.getpid()})")
+        store.log(f"engine started ({'background service' if self.headless else 'focus window'}, "
+                  f"{self.bridge.label}, pid {os.getpid()})")
+        if not self.bridge.restores:
+            return  # herdr keeps its own layout and resumes the sessions in it
         self.run_id = restore.iterm_run()
         try:
             restore.prune(self.run_id)
@@ -205,7 +210,7 @@ class App:
         """After a restart prepared with `claude-focus reboot`: open the saved
         layout without a key press (once; see restore.auto)."""
         await asyncio.sleep(restore.AUTO_RESTORE_DELAY)
-        if await restore.auto(self.conn, self.run_id, self.flash):
+        if await restore.auto(self.bridge.conn, self.run_id, self.flash):
             self.wake.set()
 
     async def _snapshot_tick(self, state):
@@ -221,10 +226,12 @@ class App:
 
     def _start_hotkeys(self):
         """Optional (config "hotkeys"). Only a focus window registers them:
-        from the background service they did not reach iTerm2."""
-        if self.headless or not self.cfg.get("hotkeys"):
+        from the background service they did not reach iTerm2. herdr has key
+        bindings of its own instead (setup adds them: `claude-focus go`,
+        `claude-focus show`)."""
+        if self.headless or not self.cfg.get("hotkeys") or not self.bridge.hotkeys:
             return
-        asyncio.ensure_future(self._guard("hotkeys", watch_hotkeys(self.conn, {
+        asyncio.ensure_future(self._guard("hotkeys", self.bridge.watch_hotkeys({
             self.cfg["hotkey_go"]: self.go_top,
             self.cfg["hotkey_focus_window"]: self.show_focus_window,
         })))
@@ -315,50 +322,47 @@ class App:
             self.wake.set()
 
     def _user_in(self, s):
-        """True while this session's pane is the active pane of the front iTerm
-        window: the user usually answers at once, so a score would be wasted."""
-        app = self.bridge.app
-        w = app.current_window if app else None
-        if not w or app.app_active is False or not w.current_tab:
-            return False
-        cur = w.current_tab.current_session
-        return cur is not None and cur.session_id == self.pane_of(s)
-
-    def _tty_of(self, s):
-        if "tty" not in s:
-            proc = (s["pid"], s["sessionId"])  # a process keeps its tty
-            if proc not in self.ttys:
-                try:
-                    tty = subprocess.run(["ps", "-o", "tty=", "-p", str(s["pid"])],
-                                         capture_output=True, text=True).stdout.strip()
-                except OSError:
-                    tty = ""
-                if not tty:
-                    s["tty"] = ""
-                    return ""
-                self.ttys[proc] = tty
-            s["tty"] = self.ttys[proc]
-        return s["tty"]
+        """True while this session's pane gets the user's keys (the active pane
+        of the front window): the user usually answers at once, so a score
+        would be wasted."""
+        pane = self.pane_of(s)
+        return pane is not None and pane == self.bridge.user_pane()
 
     def pane_of(self, s):
-        return self.panes.get(self._tty_of(s))
+        return self.bridge.pane_of(s)
 
     async def _free_terminals(self):
-        """The panes that the user marked free: when they end a session, they
-        switch its pane to the green iTerm2 profile (config "free_profile",
-        Available), or the engine does it (_recolor_panes). A pane with a running Claude session is not
-        free, and neither is this window. Oldest pane (lowest tty) first."""
-        taken = {self._tty_of(s) for s in self.sessions} - {""}
-        own = own_pane()
+        """The free panes, ready for a new session. In iTerm2, the ones the
+        user marked: when they end a session, they switch its pane to the
+        green profile (config "free_profile", Available), or the engine does
+        it (_recolor_panes); oldest pane (lowest tty) first. In herdr, every
+        pane at a bare shell, in herdr's order. A pane with a running Claude
+        session is not free, and neither is this window."""
+        taken = {self.pane_of(s) for s in self.sessions} - {None}
+        own = self.bridge.own_pane()
         out = []
-        for sid, tty, profile, path, job in await self.bridge.pane_info():
-            if profile != self.cfg["free_profile"] or sid == own or tty in taken:
+        for sid, where, profile, path, job in await self.bridge.pane_info():
+            if not self.bridge.is_free(profile, job, self.cfg) or sid == own or sid in taken:
                 continue
             here = short_path(path)
             out.append({"s": {"key": "pane:" + sid, "name": os.path.basename(here) or here},
                         "e": {}, "score": None, "fresh": None,
-                        "pane": sid, "tty": tty, "path": here, "job": job or ""})
-        out.sort(key=lambda t: int(re.sub(r"\D", "", t["tty"]) or 0))
+                        "pane": sid, "tty": where, "path": here, "job": job or ""})
+        return out
+
+    def _marks(self):
+        """{pane: (section, priority, request)} of every session with a pane:
+        its place in the queue, for herdr's sidebar (bridge.report)."""
+        out = {}
+        for sec, _ in SECTIONS:
+            for i in (self.view or {}).get(sec) or []:
+                pane = self.pane_of(i["s"]) if sec != "terminals" else None
+                if not pane:
+                    continue
+                ask = {"need": (i.get("fresh") or {}).get("ask"), "todo": i.get("needs"),
+                       "pending": i.get("why"), "free": (i.get("fresh") or {}).get("ask") or i.get("why")}
+                label = f"wakes {fmt_when(i['wake'])}" if sec == "pending" else COUNT_LABEL[sec]
+                out[pane] = (label, i.get("eff") if sec == "need" else None, ask.get(sec) or "")
         return out
 
     async def _recolor_panes(self):
@@ -371,15 +375,15 @@ class App:
           after ENDED_GRACE s it is forgotten. A session file that is
           unreadable for a moment does not count: the pane still runs claude."""
         free, back = self.cfg["free_profile"], self.cfg["session_profile"]
-        by_tty = {}
+        by_pane = {}
         for s in self.sessions:
-            if self._tty_of(s):
-                by_tty[self._tty_of(s)] = s
+            if self.pane_of(s):
+                by_pane[self.pane_of(s)] = s
         now = time.time()
         seen = set()
         for sid, tty, profile, path, job in await self.bridge.pane_info():
             seen.add(sid)
-            s = by_tty.get(tty)
+            s = by_pane.get(sid)
             if s:
                 self.claude_panes[sid] = (s.get("name") or s["sessionId"][:8], now)
                 if profile == free and await self.bridge.set_profile(sid, back):
@@ -512,7 +516,7 @@ class App:
         msg = pend.wake_message(p, reason, output)
         pane = self.pane_of(s)
         if not pane:
-            ok, why = False, "no iTerm pane"
+            ok, why = False, f"no {self.bridge.label} pane"
         elif s["status"] != "idle":
             ok, why = False, ("the session waits on a question" if s["status"] == "waiting"
                               else f"the session is not at its prompt (status {s['status']})")
@@ -603,13 +607,13 @@ class App:
         pane = self.pane_of(s)
         job = s.get("jobId") or s.get("id")
         if not pane and job:
-            # A background session (/bg) has no pane: attach it in a new window.
+            # A background session (/bg) has no pane: attach it in a new window (a new herdr tab).
             claude = shutil.which("claude") or "claude"
             self.sel = None
-            await iterm2.Window.async_create(self.conn, command=f"{claude} attach {job}")
+            await self.bridge.open_window(f"{claude} attach {job}")
             return
         if not pane:
-            self.flash(f"{s.get('name')}: no iTerm pane found")
+            self.flash(f"{s.get('name')}: no {self.bridge.label} pane found")
             return
         self.sel = None  # after this, the highlight is on the top of the queue again
         if self.answer_watch:
@@ -669,7 +673,8 @@ class App:
         terms = (self.view or {}).get("terminals") or []
         item = item or (terms[0] if terms else None)
         if not item:
-            self.flash(f"No free terminal: switch a pane to the {self.cfg['free_profile']} profile.")
+            self.flash(f"No free terminal: switch a pane to the {self.cfg['free_profile']} profile."
+                       if self.bridge.profiles else "No free terminal: open a herdr pane at a shell prompt.")
         return item
 
     async def go_terminal(self, item=None):
@@ -698,16 +703,15 @@ class App:
 
     async def start_session(self, term, path):
         """Type `cd <folder> && claude` into a free terminal, give it the
-        session profile, and go there. Only into a pane that is still at a
-        bare shell; Ctrl-U first clears anything typed at its prompt."""
+        session profile (iTerm2), and go there. Only into a pane that is still
+        at a bare shell; Ctrl-U first clears anything typed at its prompt."""
         info = {sid: (profile, job) for sid, _, profile, _, job in await self.bridge.pane_info()}
         profile, job = info.get(term["pane"], (None, None))
-        s = self.bridge.session(term["pane"])
-        if s is None or (job or "").lstrip("-") not in SHELLS:
+        if (job or "").lstrip("-") not in SHELLS or not await self.bridge.send_text(
+                term["pane"], f"\x15cd {shlex.quote(path)} && {self.cfg['new_session_command']}\r"):
             self.flash(f"The terminal {term['tty']} is not at a shell prompt any more: nothing started.")
             return
-        await s.async_send_text(f"\x15cd {shlex.quote(path)} && {self.cfg['new_session_command']}\r")
-        if profile == self.cfg["free_profile"]:
+        if self.bridge.profiles and profile == self.cfg["free_profile"]:
             await self.bridge.set_profile(term["pane"], self.cfg["session_profile"])
         store.log(f"new session in {short_path(path)} ({term['tty']})")
         self.sel = None
@@ -791,18 +795,7 @@ class App:
         if not self.headless:
             await self.bridge.activate_own()
             return
-        try:
-            with open(TUI_FILE) as f:
-                info = json.load(f)
-            os.kill(int(info["pid"]), 0)
-            s = self.bridge.app.get_session_by_id(info["session"])
-        except (OSError, ValueError, KeyError, TypeError):
-            s = None
-        if s:
-            await self.bridge.app.async_activate(raise_all_windows=False, ignoring_other_apps=True)
-            await s.async_activate(select_tab=True, order_window_front=True)
-        else:
-            await iterm2.Window.async_create(self.conn, command=BIN)
+        await show_focus(self.bridge)
 
     def _set_focused(self, focused):
         if focused != self.focused:
@@ -847,6 +840,8 @@ class App:
                 p = self.restore_plan()
                 if p:
                     self.mode, self.restore_lines = "restore", restore.describe(self.prev_layout, *p)
+                elif not self.bridge.restores:
+                    self.flash(f"{self.bridge.label} keeps its own layout and sessions: nothing to restore here.")
                 else:
                     self.flash("Nothing to restore: no session of the last iTerm2 run is closed.")
             elif key == "q":
@@ -857,7 +852,7 @@ class App:
                 self._restore_answered()
                 self.mode = "main"
                 if p:
-                    asyncio.ensure_future(self._guard("restore", restore.run(self.conn, p[0], self.flash)))
+                    asyncio.ensure_future(self._guard("restore", restore.run(self.bridge.conn, p[0], self.flash)))
             elif key == "n":
                 self._restore_answered()
                 self.mode = "main"
@@ -1086,14 +1081,15 @@ class App:
                              f"Press R to restore them.{R}")
         top_lines.append("")
 
-        bottom_lines = [fg(P["faint"]) + "─" * w + R]
+        # The keys are the last line of the screen, the flash just above the rule.
+        bottom_lines = [f"  {fg(P['working'])}{self.msg}{R}" if self.msg and time.time() < self.msg_until else "",
+                        fg(P["faint"]) + "─" * w + R]
         if self.mode == "restore" and self.restore_lines:
             bottom_lines += [f"  {fg(P['pending'])}{B}{self.restore_lines[0]}{R}"]
             bottom_lines += [f"  {fg(P['text'])}{line}{R}" for line in self.restore_lines[1:]] + [""]
-        bottom_lines += [self._keys_line(now),
-                         f"  {fg(P['working'])}{self.msg}{R}" if self.msg and time.time() < self.msg_until else ""]
+        bottom_lines.append(self._keys_line(now))
 
-        room = max(3, rows_n - len(top_lines) - len(bottom_lines) - 1)
+        room = max(3, rows_n - len(top_lines) - len(bottom_lines))
         # The rows keep their places: the selection changes only the highlight.
         sec, item = self.selected()
         list_lines, sel_line = [], None
@@ -1119,7 +1115,8 @@ class App:
         shown = list_lines[start:start + room]
         if start + room < len(list_lines):
             shown[-1] = f"  {fg(P['dim'])}… {len(list_lines) - start - room + 1} more lines (↓){R}"
-        lines = [fit(x, w) for x in top_lines + shown + bottom_lines]
+        shown += [""] * (room - len(shown))  # a short list: blank lines push the keys down
+        lines =[fit(x, w) for x in top_lines + shown + bottom_lines]
         frame = "\n".join(lines)
         if frame == self.last_frame:
             return
@@ -1170,7 +1167,12 @@ class App:
             except Exception as ex:  # keep the screen alive; details in the log
                 store.log(f"poll error: {ex!r}")
             self.wake.set()
-            await asyncio.sleep(self.cfg["poll_seconds"])
+            self.poll_now.clear()
+            try:
+                await asyncio.wait_for(self.poll_now.wait(), timeout=self.cfg["poll_seconds"])
+                await asyncio.sleep(EVENT_PAUSE)
+            except asyncio.TimeoutError:
+                pass
 
     async def render_loop(self):
         while True:
@@ -1191,26 +1193,40 @@ class App:
             store.log(f"{name} stopped: {ex!r}")
             self.flash(f"{name} stopped: {ex!r} (see ~/.claude-focus/focus.log)", 60)
 
+    async def _watch_terminal(self):
+        """The service: when detection picks the other terminal now (the
+        sessions run there, see terminal.detect), exit, and launchd starts
+        the service again on that one."""
+        while True:
+            await asyncio.sleep(TERMINAL_CHECK)
+            kind = await asyncio.get_event_loop().run_in_executor(None, terminal.detect)
+            if kind and kind != self.bridge.name:
+                store.log(f"service: the sessions run in {kind} now, not {self.bridge.name}: restarting")
+                raise SystemExit(0)
+
     async def run_headless(self):
         store.ensure()
         with open(pend.SERVICE_PID, "w") as f:
             f.write(str(os.getpid()))
         await self.bridge.start()
-        store.log(f"service connected to iTerm2 (pid {os.getpid()})")
+        store.log(f"service connected to {self.bridge.label} (pid {os.getpid()})")
+        asyncio.ensure_future(self._guard("terminal watch", self._watch_terminal()))
+        asyncio.ensure_future(self._guard("events", self.bridge.watch_events(self.poll_now.set)))
         await self.poll_loop()
 
     async def run(self):
         store.ensure()
+        own = self.bridge.own_pane()
         with open(TUI_FILE, "w") as f:
-            json.dump({"pid": os.getpid(),
-                       "session": own_pane()}, f)
+            json.dump({"pid": os.getpid(), "session": own}, f)
         await self.bridge.start()
-        self.focused = await self.bridge.has_focus(own_pane())
-        asyncio.ensure_future(self._guard("focus watch", watch_focus(
-            self.conn, self.bridge, own_pane(), self._set_focused)))
+        self.focused = await self.bridge.has_focus(own)
+        asyncio.ensure_future(self._guard("focus watch", self.bridge.watch_focus(own, self._set_focused)))
+        asyncio.ensure_future(self._guard("events", self.bridge.watch_events(self.poll_now.set)))
         loop = asyncio.get_event_loop()
-        self.prev_layout = await loop.run_in_executor(
-            None, lambda: restore.previous_layout(restore.read_history(), restore.iterm_run()))
+        if self.bridge.restores:
+            self.prev_layout = await loop.run_in_executor(
+                None, lambda: restore.previous_layout(restore.read_history(), restore.iterm_run()))
         keyq = asyncio.Queue()
         fd = sys.stdin.fileno()
         loop.add_reader(fd, lambda: keyq.put_nowait(os.read(fd, 64).decode("utf-8", "ignore")))
@@ -1226,13 +1242,23 @@ class App:
                     return
 
 
+async def show_focus(bridge):
+    """Bring the open focus screen to the front, or open one."""
+    pane = restore.focus_pane()
+    if not (pane and await bridge.go(pane, zoom=False)):
+        await bridge.open_window(BIN)
+
+
 def main():
+    kind = terminal.detect()
+    if kind is None:
+        sys.exit(terminal.NOT_RUNNING)
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     sys.stdout.write("\033[?1049h\033[?25l\033]0;claude-focus\007\033[2J")
     try:
         ttymod.setcbreak(fd)
-        iterm2.run_until_complete(lambda conn: App(conn).run())
+        terminal.run(lambda bridge: App(bridge).run(), kind)
     except KeyboardInterrupt:
         pass
     finally:
