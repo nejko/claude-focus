@@ -150,6 +150,33 @@ class LayoutTest(unittest.TestCase):
         self.assertIn("hotel-website", row)
         self.assertIn("~/Projects/hotel-website", row)
 
+    def test_every_row_shows_its_folder_in_one_column(self):
+        a, b = need("api", "Deploy?"), pending("docs", "the tag")
+        a["s"]["cwd"] = os.path.expanduser("~/code/api")
+        b["s"]["cwd"] = "/srv/docs-site"
+        screen = self.screen([a, b], terminals=[terminal("t", "ttys002", "~/code/web")])
+        rows = [next(x for x in screen if f" {n} " in x[:60]) for n in ("api", "docs", "web")]
+        cols = [x.index(p) for x, p in zip(rows, ("~/code/api", "/srv/docs-site", "~/code/web"))]
+        self.assertEqual(len(set(cols)), 1)  # one column, after the name
+        self.assertLess(rows[0].index("api"), cols[0])
+        self.assertEqual(rows[2].count("~/code/web"), 1)  # not again in the text
+
+    def test_working_row_names_its_folder_once(self):
+        w = need("builder", "x")
+        w["s"].update(status="busy", cwd=os.path.expanduser("~/code/builder"))
+        self.app.view = {"working": [w]}
+        wide = ANSI.sub("", self.app.row("working", w, 200))
+        self.assertEqual(wide.count("~/code/builder"), 1)
+        narrow = ANSI.sub("", self.app.row("working", w, 90))  # no folder column: the text names it
+        self.assertEqual(narrow.count("~/code/builder"), 1)
+
+    def test_a_long_folder_keeps_its_end(self):
+        item = need("deep", "?")
+        item["s"]["cwd"] = "/very/long/" + "x" * 60 + "/the-project"
+        self.app.view = {"need": [item]}
+        line = ANSI.sub("", self.app.row("need", item, 300))
+        self.assertIn("…" + ("x" * 60 + "/the-project")[-(appmod.PATH_CELLS - 1):] + "  ", line)
+
     def test_nothing_needs_you(self):
         screen = self.screen([self.long], terminals=[terminal("a", "ttys002")])
         self.assertTrue(any("Nothing needs you now." in x for x in screen))

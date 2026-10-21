@@ -58,6 +58,14 @@ def cut(text, n):
     return text if len(text) <= n else text[:n - 1] + "…"
 
 
+def cut_left(text, n):
+    """Plain text to at most n columns, with … where its start was cut: a
+    path keeps its end, the part that names the folder."""
+    if n <= 0:
+        return ""
+    return text if len(text) <= n else "…" + text[len(text) - n + 1:]
+
+
 def pad(s, n, right=False):
     """Pad a colored string to n visible columns (right=True: align right)."""
     gap = " " * max(0, n - width(s))

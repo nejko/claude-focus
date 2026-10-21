@@ -46,6 +46,7 @@ COUNT_LABEL = {"need": "need you", "todo": "to-do", "pending": "pending", "worki
                "free": "free", "terminals": "terminals"}
 HIGH, MID = 80, 60        # priorities shown in red and in amber
 PRIORITY_CELLS = 8        # the length of a priority bar at 100
+PATH_CELLS = 40           # the widest folder column; a longer path keeps its end
 
 
 def fmt_wait(h):
@@ -861,22 +862,35 @@ class App:
     # was not typed, a duplicate, no pane). The rest is grey.
 
     def _cols(self, w):
-        return {"lead": 13, "age": 9, "name": 28 if w >= 110 else 20, "kind": 9 if w >= 100 else 0}
+        # The folder column is as wide as the longest folder on the screen, and
+        # only on a wide screen; on a narrow one WORKING shows it as its text.
+        wide = w >= 110
+        paths = [self._path(sec, i) for sec, _ in SECTIONS for i in (self.view or {}).get(sec) or []] if wide else []
+        return {"lead": 13, "age": 9, "name": 28 if wide else 20,
+                "path": min(PATH_CELLS, max(map(len, paths), default=0)), "kind": 9 if w >= 100 else 0}
+
+    @staticmethod
+    def _path(sec, item):
+        """The folder of a row: the session's cwd, or a free terminal's path."""
+        if sec == "terminals":
+            return item["path"]
+        return short_path(item["s"]["cwd"]) if item["s"].get("cwd") else ""
 
     # How bright a row's name and text are: what needs the user stands out, what
     # waits or works is softer, and FREE is grey.
     TONE = {"need": ("text", "text"), "todo": ("text", "text"), "pending": ("soft", "soft"),
             "working": ("soft", "soft"), "free": ("dim", "dim"), "terminals": ("text", "dim")}
 
-    def _row_parts(self, sec, item):
-        """(lead, age, kind, tags, text) of one row; the lead, tags and text can carry color."""
+    def _row_parts(self, sec, item, path_col=False):
+        """(lead, age, kind, tags, text) of one row; the lead, tags and text can carry color.
+        path_col: the row has a folder column, so the text need not name the folder."""
         P, s, sc = self.pal, item["s"], item["fresh"] or {}
         acc, dim, alert = P[sec], fg(P["dim"]), fg(P["alert"])
         now_ms = time.time() * 1000
         since = fmt_wait(max(0, now_ms - s["statusSince"]) / 3.6e6) if "statusSince" in s else ""
         tags, text = [], ""
         if sec == "terminals":
-            where = "" if item["path"] == item["s"]["name"] else item["path"] + "  "
+            where = "" if path_col or item["path"] == item["s"]["name"] else item["path"] + "  "
             return f"{fg(acc)}❯{R}", "", item["job"], [], where + item["tty"]
         if sec == "need":
             eff = item["eff"]
@@ -907,7 +921,7 @@ class App:
             shells = s["status"] == "shell"
             lead, age = f"{fg(acc)}{'◌' if shells else '●'}{R}", since
             kind = "shells" if shells else "busy"
-            text = short_path(s.get("cwd"))
+            text = "" if path_col else short_path(s.get("cwd"))
         else:  # free
             done = item["e"].get("dismissed_stamp") == s["statusSince"]
             lead, age, kind = f"{fg(acc)}○{R}", since, "done" if done else "nothing"
@@ -923,13 +937,16 @@ class App:
 
     def row(self, sec, item, w, selected=False):
         P, cols = self.pal, self._cols(w)
-        lead, age, kind, tags, text = self._row_parts(sec, item)
+        lead, age, kind, tags, text = self._row_parts(sec, item, path_col=bool(cols["path"]))
         name_tone, text_tone = ("text", "text") if selected else self.TONE[sec]
         name = look.cut(item["s"].get("name") or "?", cols["name"])
         name = f"{fg(P[name_tone])}{B if name_tone != 'dim' else ''}{name}{R}"
         mark = f"{fg(P[sec])}▌{R} " if selected else "  "
         line = (mark + look.pad(lead, cols["lead"]) + look.pad(f"{fg(P['dim'])}{age}{R}", cols["age"], right=True)
                 + "  " + look.pad(name, cols["name"]) + "  ")
+        if cols["path"]:
+            path = look.cut_left(self._path(sec, item), cols["path"])
+            line += look.pad(f"{fg(P['dim'])}{path}{R}", cols["path"]) + "  "
         if cols["kind"]:
             line += look.pad(f"{fg(mix(P[sec], P['bg'], 0.8))}{look.cut(kind, cols['kind'])}{R}", cols["kind"]) + " "
         line += "".join(t + "  " for t in tags) + fg(P[text_tone]) + text + R

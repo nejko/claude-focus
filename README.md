@@ -120,9 +120,12 @@ The sections, top to bottom:
 Every section uses one grid, so each column is always in the same place: a
 lead (in NEED YOU the priority as a number and a bar whose length is the
 priority; in PENDING the wake time), an age (how long it has waited for you,
-worked or slept; in PENDING the time until it wakes), the name, a kind
-(decision, action, check, wait, snoozed, busy, shells, ...) and the text.
-Narrow windows drop the kind column.
+worked or slept; in PENDING the time until it wakes), the name, the folder
+the session runs in, a kind (decision, action, check, wait, snoozed, busy,
+shells, ...) and the text. The folder column is as wide as the longest
+folder on the screen, at most 40 columns; a longer folder keeps its end.
+Windows narrower than 110 columns drop the folder column (WORKING then shows
+the folder as its text), and below 100 columns also the kind column.
 
 Each section has its own color. A priority of 80 or more is red, of 60 or
 more amber, and the rest grey. Alerts are red: a wake-up that could not be
