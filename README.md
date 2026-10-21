@@ -385,6 +385,12 @@ that does not exist yet.
   pane also gets back your default profile. `new_session_command` sets the
   command, for example `claude --model opus`. It types only into a pane that
   is still at a bare shell.
+- In a folder where Claude Code ran before, Enter first asks how to start,
+  with the number of sessions there, when the last one ran, and how many run
+  now. `n` (or Enter) starts a new session, `c` continues the last one
+  (`claude --continue`), and `r` resumes an earlier one from Claude Code's
+  own list (`claude --resume`). ↑↓ and Enter work too. The flag goes after
+  `new_session_command`. Esc goes back to the folders.
 - Tab goes to the terminal without starting anything.
 - Esc goes back to the list of sessions.
 

@@ -116,6 +116,23 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(folders.marks("~/x/ultima", ""), set())
 
 
+class PastSessionsTest(unittest.TestCase):
+    def test_count_and_last_time(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        where = os.path.join(tmp, folders._encoded("/Users/ana/quantum notes"))
+        os.makedirs(os.path.join(where, "a1"))  # a session's own folder (subagents) is not a session
+        for name, age in (("a1.jsonl", 3), ("b2.jsonl", 1), ("notes.txt", 0)):
+            with open(os.path.join(where, name), "w"):
+                pass
+            t = time.time() - age * DAY
+            os.utime(os.path.join(where, name), (t, t))
+        n, last = folders.past_sessions("/Users/ana/quantum notes", tmp)
+        self.assertEqual(n, 2)
+        self.assertAlmostEqual(last, time.time() - DAY, delta=5)
+        self.assertEqual(folders.past_sessions("/Users/ana/elsewhere", tmp), (0, 0))
+
+
 class NewFolderTest(unittest.TestCase):
     """The folder that the picker offers to create from what the user typed."""
 

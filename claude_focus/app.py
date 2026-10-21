@@ -39,6 +39,10 @@ TERMINAL_CHECK = 60       # seconds between two looks of the service at which te
 
 KIND_LABEL = {"decision": "decision", "action": "action", "login": "login",
               "review": "review", "info": "info", "nothing": "nothing"}
+# How a session starts in a folder where Claude Code ran before (the step
+# after the folder picker): key, label, what follows new_session_command.
+START_KINDS = [("n", "New session", ""), ("c", "Continue the last session", " --continue"),
+               ("r", "Resume an earlier session", " --resume")]  # --resume: Claude Code's own list
 SECTIONS = [("need", "NEED YOU"), ("todo", "YOUR TO-DOS"), ("pending", "PENDING"),
             ("working", "WORKING"), ("free", "FREE"), ("terminals", "AVAILABLE TERMINALS")]
 COUNT_LABEL = {"need": "need you", "todo": "to-do", "pending": "pending", "working": "working",
@@ -65,6 +69,11 @@ def fmt_when(ms):
     if (t.date() - now.date()).days < 7:
         return t.strftime("%a %H:%M")
     return t.strftime("%d %b %H:%M")
+
+
+def ago(t):
+    """Unix s as "now" or "5h20m ago"."""
+    return "now" if time.time() - t < 60 else f"{fmt_wait((time.time() - t) / 3600)} ago"
 
 
 def short_path(path):
@@ -709,22 +718,35 @@ class App:
         """True while the picker's selection is the new-folder row."""
         return bool(self.new_folder) and self.pick["sel"] == len(self.matches)
 
-    async def start_session(self, term, path, create=False):
+    async def choose_start(self, term, path):
+        """A folder is picked. Where Claude Code ran before, ask how to start
+        (START_KINDS: a new session, --continue or --resume); else start a
+        new session at once."""
+        past = await asyncio.get_event_loop().run_in_executor(None, folders.past_sessions, path)
+        if not past[0]:
+            self.mode = "main"
+            await self.start_session(term, path)
+            return
+        self.pick.update(path=path, past=past, kind=0)
+        self.mode = "start"
+
+    async def start_session(self, term, path, create=False, flags=""):
         """Type `cd <folder> && claude` into a free terminal (with create,
-        `mkdir -p <folder> && ` first), give it the session profile (iTerm2),
-        and go there. Only into a pane that is still at a bare shell; Ctrl-U
-        first clears anything typed at its prompt."""
+        `mkdir -p <folder> && ` first; flags such as " --continue" after the
+        command), give it the session profile (iTerm2), and go there. Only
+        into a pane that is still at a bare shell; Ctrl-U first clears
+        anything typed at its prompt."""
         info = {sid: (profile, job) for sid, _, profile, _, job in await self.bridge.pane_info()}
         profile, job = info.get(term["pane"], (None, None))
         where = shlex.quote(path)
         mkdir = f"mkdir -p {where} && " if create else ""
         if (job or "").lstrip("-") not in SHELLS or not await self.bridge.send_text(
-                term["pane"], f"\x15{mkdir}cd {where} && {self.cfg['new_session_command']}\r"):
+                term["pane"], f"\x15{mkdir}cd {where} && {self.cfg['new_session_command']}{flags}\r"):
             self.flash(f"The terminal {term['tty']} is not at a shell prompt any more: nothing started.")
             return
         if self.bridge.profiles and profile == self.cfg["free_profile"]:
             await self.bridge.set_profile(term["pane"], self.cfg["session_profile"])
-        store.log(f"new session in {'a new folder ' if create else ''}{short_path(path)} ({term['tty']})")
+        store.log(f"new session{flags} in {'a new folder ' if create else ''}{short_path(path)} ({term['tty']})")
         self.sel = None
         await self.bridge.go(term["pane"], zoom=self.cfg["zoom"])
 
@@ -909,11 +931,11 @@ class App:
             elif key in ("\x1b[A", "\x1bOA", "\x1b[B", "\x1bOB") and n:
                 self.pick["sel"] = (self.pick["sel"] + (-1 if key[-1] == "A" else 1)) % n
             elif key in ("\r", "\n") and n:
-                self.mode = "main"
                 if self._creating():
+                    self.mode = "main"
                     await self.start_session(term, self.new_folder, create=True)
                 else:
-                    await self.start_session(term, self.matches[self.pick["sel"]][0])
+                    await self.choose_start(term, self.matches[self.pick["sel"]][0])
             elif key == "\t":
                 self.mode = "main"
                 await self.go_terminal(term)
@@ -923,6 +945,19 @@ class App:
             elif key.isprintable():
                 self.buf += key
                 self._search()
+        elif self.mode == "start":
+            term, letters = self.pick["term"], [k for k, _, _ in START_KINDS]
+            if key == "\x1b":
+                self.mode = "folders"  # back to the folder list, with the search
+            elif key in ("\x1b[A", "\x1bOA", "\x1b[B", "\x1bOB"):
+                self.pick["kind"] = (self.pick["kind"] + (-1 if key[-1] == "A" else 1)) % len(START_KINDS)
+            elif key in ("\r", "\n") or key in letters:
+                kind = START_KINDS[letters.index(key) if key in letters else self.pick["kind"]]
+                self.mode = "main"
+                await self.start_session(term, self.pick["path"], flags=kind[2])
+            elif key == "\t":
+                self.mode = "main"
+                await self.go_terminal(term)
         self.wake.set()
 
     # ---- render -----------------------------------------------------------
@@ -1079,11 +1114,32 @@ class App:
             text = look.cut_left(text, pw)
             hit, tone = folders.marks(text, self.buf), fg(P["text"] if selected else P["soft"])
             body = "".join(f"{fg(acc)}{B}{c}{R}" if i in hit else f"{tone}{c}{R}" for i, c in enumerate(text))
-            age = "no recent session" if not used else "now" if now - when < 60 else \
-                f"{fmt_wait((now - when) / 3600)} ago"
+            age = ago(when) if used else "no recent session"
             line = (f"{fg(acc)}▌{R} " if selected else "  ") + look.pad(body, pw) + f"  {dim}{age}{R}"
             lines.append(look.on(line, mix(acc, P["bg"], 0.16), w) if selected else line)
         return lines + new
+
+    def _start_lines(self, w):
+        """The step after the folder picker, in a folder where Claude Code ran
+        before: a new session, the last one continued, or an earlier one
+        resumed from Claude Code's own list. Each row shows its command."""
+        P, acc, term, path = self.pal, self.pal["terminals"], self.pick["term"], self.pick["path"]
+        dim = fg(P["dim"])
+        n, last = self.pick["past"]
+        about = f"{n} session{'s' if n != 1 else ''} here, the last {ago(last)}"
+        running = sum(1 for s in self.sessions if s.get("cwd") == path)
+        if running:
+            about += f"; {running} of them run{'s' if running == 1 else ''} now"
+        lines = [self.section_title("terminals", f"NEW SESSION IN {term['tty']}", "", w),
+                 f"  {fg(P['text'])}{B}{look.cut_left(short_path(path), w - 4)}{R}   {dim}{about}{R}", ""]
+        lw = max(len(label) for _, label, _ in START_KINDS)  # the commands in one column
+        for i, (key, label, flags) in enumerate(START_KINDS):
+            on = i == self.pick["kind"]
+            line = ((f"{fg(acc)}▌{R} " if on else "  ") + f"{fg(acc)}{B}{key}{R}  "
+                    f"{fg(P['text'] if on else P['soft'])}{look.pad(label, lw)}{R}"
+                    f"   {dim}{self.cfg['new_session_command']}{flags}{R}")
+            lines.append(look.on(line, mix(acc, P["bg"], 0.16), w) if on else line)
+        return lines
 
     def render(self):
         cols, rows_n = shutil.get_terminal_size((100, 40))
@@ -1117,11 +1173,13 @@ class App:
         list_lines, sel_line = [], None
         if self.mode == "folders":
             list_lines = self._folder_lines(w, room)
+        elif self.mode == "start":
+            list_lines = self._start_lines(w)
         elif not self.rows():
             list_lines += [f"  {fg(P['dim'])}No Claude sessions and no free terminal.{R}"]
         elif not v.get("need") and not v.get("todo"):
             list_lines += [f"  {fg(P['terminals'])}{B}✓ Nothing needs you now.{R}"]
-        for key, title in SECTIONS if self.mode != "folders" else ():
+        for key, title in SECTIONS if self.mode not in ("folders", "start") else ():
             if not v.get(key):
                 continue
             if list_lines:
@@ -1166,9 +1224,15 @@ class App:
                     f"YYYY-MM-DD HH:MM){R}  {fg(P['text'])}{self.buf}█{R}")
         if self.mode == "priority":
             return f"  {fg(P['need'])}{B}Priority{R} {fg(P['dim'])}1-100 (0 = automatic){R}  {fg(P['text'])}{self.buf}█{R}"
+        if self.mode == "start":
+            return "  " + "   ".join([self._key("⏎", "start"), self._key("↑↓", "select"),
+                                     self._key("⇥", "just go to the terminal"), self._key("esc", "back to the folders")])
         if self.mode == "folders":
-            make = "make it, " if self._creating() else ""
-            return "  " + "   ".join([self._key("⏎", f"{make}cd there and run {self.cfg['new_session_command']}"),
+            match = self.matches[self.pick["sel"]] if self.pick["sel"] < len(self.matches) else None
+            what = (f"make it, cd there and run {self.cfg['new_session_command']}" if self._creating() else
+                    "start there: new, continue or resume" if match and match[2] else
+                    f"cd there and run {self.cfg['new_session_command']}")
+            return "  " + "   ".join([self._key("⏎", what),
                                      self._key("↑↓", "select"), self._key("⇥", "just go to the terminal"),
                                      self._key("esc", "cancel")])
         keys = [("⏎", "go"), ("↑↓", "select"), ("esc", "top"), ("n", "new session"), ("s", "snooze"),

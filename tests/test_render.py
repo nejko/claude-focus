@@ -245,6 +245,8 @@ class TerminalTest(unittest.TestCase):
         patcher = mock.patch.object(appmod.folders, "candidates", return_value=found)
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.past = mock.patch.object(appmod.folders, "past_sessions", return_value=(0, 0)).start()
+        self.addCleanup(mock.patch.stopall)
         self.app.sessions = [{"pid": 7, "sessionId": "c", "key": "c", "tty": "ttys012"},
                              {"pid": 8, "sessionId": "bg", "key": "bg", "tty": ""}]
         self.root = tempfile.mkdtemp()  # the project folder that a new folder goes into
@@ -350,6 +352,56 @@ class TerminalTest(unittest.TestCase):
         self.assertTrue(any(x.startswith("▌ + new folder") and x.rstrip().endswith("/qx") for x in screen))
         self.assertTrue(any("make it, cd there and run claude" in x for x in screen))
 
+    def test_a_folder_without_sessions_starts_at_once(self):
+        self.keys("n", "\x1b[B", "\r")  # ~/Projects/api: no Claude session ran there
+        self.app.bridge.send_text.assert_awaited_once_with("p2", "\x15cd /Users/ana/Projects/api && claude\r")
+        self.assertEqual(self.app.mode, "main")
+
+    def start_step(self, *keys):
+        self.past.return_value = (3, time.time() - 7200)
+        self.keys("n", "q", "n", "\r", *keys)
+
+    def test_where_claude_ran_before_enter_asks_how_to_start(self):
+        self.start_step()
+        self.assertEqual((self.app.mode, self.app.pick["path"]), ("start", "/Users/ana/quantum notes"))
+        self.app.bridge.send_text.assert_not_awaited()
+
+    def test_the_three_ways_to_start(self):
+        for keys, flags in ((("\r",), ""), (("n",), ""), (("c",), " --continue"), (("r",), " --resume"),
+                            (("\x1b[B", "\r"), " --continue"), (("\x1b[A", "\r"), " --resume")):
+            self.app.bridge.send_text.reset_mock()
+            self.start_step(*keys)
+            self.app.bridge.send_text.assert_awaited_once_with(
+                "p2", f"\x15cd '/Users/ana/quantum notes' && claude{flags}\r")
+            self.assertEqual(self.app.mode, "main")
+
+    def test_the_flags_follow_the_configured_command(self):
+        self.app.cfg = dict(self.app.cfg, new_session_command="claude --dangerously-skip-permissions")
+        self.start_step("c")
+        self.app.bridge.send_text.assert_awaited_once_with(
+            "p2", "\x15cd '/Users/ana/quantum notes' && claude --dangerously-skip-permissions --continue\r")
+
+    def test_esc_goes_back_to_the_folders_and_tab_to_the_terminal(self):
+        self.start_step("\x1b")
+        self.assertEqual((self.app.mode, self.app.buf), ("folders", "qn"))
+        self.keys("\r", "\t")
+        self.app.bridge.go.assert_awaited_once_with("p2", zoom=True)
+        self.app.bridge.send_text.assert_not_awaited()
+
+    def test_start_step_screen(self):
+        self.app.sessions.append({"pid": 9, "sessionId": "q", "key": "q", "cwd": "/Users/ana/quantum notes"})
+        self.start_step("\x1b[B")
+        screen = self.picker_screen()
+        self.assertTrue(any("/Users/ana/quantum notes" in x and "3 sessions here, the last 2h00m ago; "
+                            "1 of them runs now" in x for x in screen))
+        self.assertTrue(any(x.startswith("  n  New session") and x.rstrip().endswith("claude") for x in screen))
+        self.assertTrue(any(x.startswith("▌ c  Continue the last session") and "claude --continue" in x
+                            for x in screen))
+        self.assertTrue(any(x.startswith("  r  Resume an earlier session") and "claude --resume" in x
+                            for x in screen))
+        self.assertTrue(any("back to the folders" in x for x in screen))
+        self.assertTrue(all(len(x) <= 119 for x in screen))
+
     def test_backspace_ctrl_u_and_esc(self):
         self.keys("n", "q", "x")
         self.assertEqual(self.app.matches, [])
@@ -373,7 +425,7 @@ class TerminalTest(unittest.TestCase):
         self.assertTrue(any("NEW SESSION IN ttys002" in x for x in screen))
         self.assertTrue(any(x.startswith("▌ /Users/ana/quantum notes") and "ago" in x for x in screen))
         self.assertTrue(any("› qn" in x for x in screen))
-        self.assertTrue(any("cd there and run claude" in x and "make it" not in x for x in screen))
+        self.assertTrue(any("start there: new, continue or resume" in x for x in screen))  # it ran there
         self.assertTrue(any(x.startswith("  + new folder") for x in screen))  # below the list, not selected
         self.assertFalse(any("NEED YOU" in x for x in screen))
         self.assertTrue(all(len(x) <= 119 for x in screen))

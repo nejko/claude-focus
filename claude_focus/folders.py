@@ -18,13 +18,20 @@ def _encoded(path):
     return re.sub(r"[^a-zA-Z0-9]", "-", path)
 
 
-def _last_session(path, transcripts):
-    """When a Claude session in this folder last wrote its transcript (0 = never)."""
+def past_sessions(path, transcripts=TRANSCRIPTS):
+    """(how many Claude sessions ran in this folder, Unix s when the last one
+    wrote its transcript): from the transcripts Claude Code keeps for it."""
     try:
         with os.scandir(os.path.join(transcripts, _encoded(path))) as it:
-            return max((e.stat().st_mtime for e in it if e.name.endswith(".jsonl")), default=0)
+            times = [e.stat().st_mtime for e in it if e.name.endswith(".jsonl")]
     except OSError:
-        return 0
+        return 0, 0
+    return len(times), max(times, default=0)
+
+
+def _last_session(path, transcripts):
+    """When a Claude session in this folder last wrote its transcript (0 = never)."""
+    return past_sessions(path, transcripts)[1]
 
 
 def candidates(roots, claude_json=CLAUDE_JSON, transcripts=TRANSCRIPTS, skip=TEMP):
