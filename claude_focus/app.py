@@ -151,7 +151,8 @@ class App:
         self.seen_written = 0     # Unix ms of the last write of state["seen"]
         self.terminals = []       # the free terminals (see _free_terminals); only a focus window reads them
         self.claude_panes = {}    # iterm session id -> (session name, Unix s last seen) of panes that ran a session
-        self.pal = look.DARK      # the colors of the terminal's theme now
+        self.pal = look.DARK      # the colors now: config "theme" for the terminal's appearance
+        self.appearance = "dark"  # the terminal's appearance (bridge.theme)
         self.pick = None          # the folder picker: {"term": free terminal, "sel": row}
         self.folders = []         # its folders (see folders.candidates)
         self.matches = []         # the folders that match what the user typed (self.buf)
@@ -166,7 +167,8 @@ class App:
         await self.bridge.refresh()
         if not self.headless and not self.passive:
             self.terminals = await self._free_terminals()
-            self.pal = look.palette(await self.bridge.theme())
+            self.appearance = await self.bridge.theme()
+            self.pal = look.palette(self.appearance, self.cfg["theme"])
         # The service is the preferred engine. A focus window is the engine
         # only while no service runs, and it hands the role back when one does.
         if self.engine and not self.headless and pend.service_alive():
@@ -750,6 +752,17 @@ class App:
         self.sel = None
         await self.bridge.go(term["pane"], zoom=self.cfg["zoom"])
 
+    def next_theme(self):
+        """Key t: the next theme of look.THEMES, kept in the config."""
+        names = list(look.THEMES)
+        now = self.cfg["theme"]
+        name = names[(names.index(now) + 1) % len(names)] if now in names else names[0]
+        self.cfg["theme"] = name
+        self.pal = look.palette(self.appearance, name)
+        store.ensure()
+        store._write(store.CONFIG, dict(store._read(store.CONFIG, {}), theme=name))
+        self.flash(f"Theme: {name}. t switches to the next one ({', '.join(names)}).")
+
     def _update_selected(self, fn, done_text):
         sec, item = self.selected()
         if not item:
@@ -854,6 +867,8 @@ class App:
                 self.sel = None
             elif key == "n":
                 await self.pick_folder()
+            elif key == "t":
+                self.next_theme()
             elif sec == "terminals" and key in ("s", "p", "d", "u", "r"):
                 self.flash("A free terminal: Enter starts a new session in it.")
             elif key == "s" and item:
@@ -1058,12 +1073,32 @@ class App:
         if cols["kind"]:
             line += look.pad(f"{fg(mix(P[sec], P['bg'], 0.8))}{look.cut(kind, cols['kind'])}{R}", cols["kind"]) + " "
         line += "".join(t + "  " for t in tags) + fg(P[text_tone]) + text + R
-        return look.on(line, mix(P[sec], P["bg"], 0.16), w) if selected else fit(line, w)
+        return self._on(line, P[sec], w) if selected else fit(line, w)
+
+    def _on(self, line, color, w):
+        """The selected row: on a tint of its section's color; in a theme with
+        a selection bar (Norton Commander), all in the bar's colors."""
+        P = self.pal
+        if P.get("select"):
+            text, back = P["select"]
+            return look.on(fg(text) + look.ANSI.sub("", line), back, w)
+        return look.on(line, mix(color, P["bg"], 0.16), w)
 
     def section_title(self, sec, title, n, w):
         P, acc = self.pal, self.pal[sec]
-        head = f" {bg(mix(acc, P['bg'], 0.24))}{fg(acc)}{B} {title} {R} {fg(acc)}{n}{R} "
+        count = f" {fg(acc)}{n}{R}" if n != "" else ""  # "": a title without a count (the start step)
+        if P.get("frame"):  # a divider of the frame: ╟─ NEED YOU 3 ───╢ (see _framed)
+            head = f"{fg(P['frame'])}─ {fg(acc)}{B}{title}{R}{count} "
+            return head + fg(P["frame"]) + "─" * max(0, w - width(head)) + R
+        head = f" {bg(mix(acc, P['bg'], 0.24))}{fg(acc)}{B} {title} {R}{count} "
         return head + fg(P["faint"]) + "─" * max(0, w - width(head)) + R
+
+    def _framed(self, line, inner):
+        """A line of the list inside the theme's frame. A section title (it
+        starts with ─) joins the frame as a divider."""
+        fc = fg(self.pal["frame"])
+        side = "╟╢" if look.ANSI.sub("", line).startswith("─") else "║║"
+        return f"{fc}{side[0]}{R}" + look.pad(fit(line, inner), inner) + f"{fc}{side[1]}{R}"
 
     def _title_line(self, v, w, now):
         P = self.pal
@@ -1077,7 +1112,8 @@ class App:
         if self.focused:  # a full-width green bar: this window gets the keys
             right = "   ".join([f"{n} {COUNT_LABEL[sec]}" for sec, n in counts] + extra + [clock])
             gap = " " * max(1, w - 14 - len(right))
-            return f"{FOCUS_BAR} CLAUDE FOCUS{gap}{right} {R}"
+            bar = fg(P["bar"][0]) + bg(P["bar"][1]) + B if P.get("bar") else FOCUS_BAR
+            return f"{bar} CLAUDE FOCUS{gap}{right} {R}"
         parts = [f"{fg(P[sec]) if n else fg(P['faint'])}{B}{n}{R} {fg(P['dim'])}{COUNT_LABEL[sec]}{R}"
                  for sec, n in counts]
         right = "   ".join(parts + [f"{fg(P['dim'])}{x}{R}" for x in extra] + [f"{fg(P['text'])}{clock}{R}"])
@@ -1099,7 +1135,7 @@ class App:
             on = self._creating()
             line = (f"{fg(acc)}▌{R} " if on else "  ") + f"{fg(acc)}{B}+ new folder{R} " \
                 f"{fg(P['text'] if on else P['soft'])}{look.cut_left(short_path(self.new_folder), w - 20)}{R}"
-            new = [look.on(line, mix(acc, P["bg"], 0.16), w) if on else line]
+            new = [self._on(line, acc, w) if on else line]
         if not self.matches:
             return lines + [f"  {dim}No folder matches.{R}"] + new
         sel = min(self.pick["sel"], len(self.matches) - 1)
@@ -1116,7 +1152,7 @@ class App:
             body = "".join(f"{fg(acc)}{B}{c}{R}" if i in hit else f"{tone}{c}{R}" for i, c in enumerate(text))
             age = ago(when) if used else "no recent session"
             line = (f"{fg(acc)}▌{R} " if selected else "  ") + look.pad(body, pw) + f"  {dim}{age}{R}"
-            lines.append(look.on(line, mix(acc, P["bg"], 0.16), w) if selected else line)
+            lines.append(self._on(line, acc, w) if selected else line)
         return lines + new
 
     def _start_lines(self, w):
@@ -1138,7 +1174,7 @@ class App:
             line = ((f"{fg(acc)}▌{R} " if on else "  ") + f"{fg(acc)}{B}{key}{R}  "
                     f"{fg(P['text'] if on else P['soft'])}{look.pad(label, lw)}{R}"
                     f"   {dim}{self.cfg['new_session_command']}{flags}{R}")
-            lines.append(look.on(line, mix(acc, P["bg"], 0.16), w) if on else line)
+            lines.append(self._on(line, acc, w) if on else line)
         return lines
 
     def render(self):
@@ -1157,11 +1193,13 @@ class App:
             top_lines.append(f"  {fg(P['pending'])}{B}{n} window{'s' if n != 1 else ''} from before the iTerm2 "
                              f"restart {'are' if n != 1 else 'is'} closed (layout saved {when}). "
                              f"Press R to restore them.{R}")
-        top_lines.append("")
+        frame = P.get("frame")  # a theme that frames the list (Norton Commander): two columns less inside
+        inner = w - 2 if frame else w
+        top_lines.append(f"{fg(frame)}╔{'═' * inner}╗{R}" if frame else "")
 
         # The keys are the last line of the screen, the flash just above the rule.
         bottom_lines = [f"  {fg(P['working'])}{self.msg}{R}" if self.msg and time.time() < self.msg_until else "",
-                        fg(P["faint"]) + "─" * w + R]
+                        f"{fg(frame)}╚{'═' * inner}╝{R}" if frame else fg(P["faint"]) + "─" * w + R]
         if self.mode == "restore" and self.restore_lines:
             bottom_lines += [f"  {fg(P['pending'])}{B}{self.restore_lines[0]}{R}"]
             bottom_lines += [f"  {fg(P['text'])}{line}{R}" for line in self.restore_lines[1:]] + [""]
@@ -1172,9 +1210,9 @@ class App:
         sec, item = self.selected()
         list_lines, sel_line = [], None
         if self.mode == "folders":
-            list_lines = self._folder_lines(w, room)
+            list_lines = self._folder_lines(inner, room)
         elif self.mode == "start":
-            list_lines = self._start_lines(w)
+            list_lines = self._start_lines(inner)
         elif not self.rows():
             list_lines += [f"  {fg(P['dim'])}No Claude sessions and no free terminal.{R}"]
         elif not v.get("need") and not v.get("todo"):
@@ -1184,11 +1222,11 @@ class App:
                 continue
             if list_lines:
                 list_lines.append("")
-            list_lines.append(self.section_title(key, title, len(v[key]), w))
+            list_lines.append(self.section_title(key, title, len(v[key]), inner))
             for i in v[key]:
                 if i is item:
                     sel_line = len(list_lines)
-                list_lines.append(self.row(key, i, w, selected=i is item))
+                list_lines.append(self.row(key, i, inner, selected=i is item))
         start = 0
         if len(list_lines) > room and sel_line is not None and sel_line >= room - 1:
             start = min(sel_line - room + 2, len(list_lines) - room)
@@ -1196,18 +1234,27 @@ class App:
         if start + room < len(list_lines):
             shown[-1] = f"  {fg(P['dim'])}… {len(list_lines) - start - room + 1} more lines (↓){R}"
         shown += [""] * (room - len(shown))  # a short list: blank lines push the keys down
-        lines =[fit(x, w) for x in top_lines + shown + bottom_lines]
+        if frame:
+            shown = [self._framed(x, inner) for x in shown]
+            bottom_lines[0] = self._framed(bottom_lines[0], inner)
+        lines = [fit(x, w) for x in top_lines + shown + bottom_lines]
+        if P.get("paint"):  # every line on the theme's background, the keys on theirs; \033[K fills the rest
+            lines = [look.on(x, P["keys_bg"] if n == len(lines) - 1 else P["bg"], w)[:-len(R)]
+                     for n, x in enumerate(lines)]
         frame = "\n".join(lines)
         if frame == self.last_frame:
             return
         self.last_frame = frame
         # Synchronized update + overwrite in place (no full clear): no flicker.
         body = "\033[K\n".join(lines)
-        sys.stdout.write("\033[?2026h\033[H" + body + "\033[K\033[J\033[?2026l")
+        sys.stdout.write("\033[?2026h\033[H" + body + "\033[K\033[J" + R + "\033[?2026l")
         sys.stdout.flush()
 
     def _key(self, cap, label):
         P = self.pal
+        if P.get("keys"):  # a key bar: the key, then its label in a field of its own
+            cap_fg, cap_bg, label_fg, label_bg = P["keys"]
+            return f"{bg(cap_bg)}{fg(cap_fg)}{B}{cap}{R}{bg(label_bg)}{fg(label_fg)} {label} {R}"
         return f"{bg(P['key'])}{fg(P['text'])}{B} {cap} {R} {fg(P['dim'])}{label}{R}"
 
     def _keys_line(self, now):
@@ -1236,13 +1283,16 @@ class App:
                                      self._key("↑↓", "select"), self._key("⇥", "just go to the terminal"),
                                      self._key("esc", "cancel")])
         keys = [("⏎", "go"), ("↑↓", "select"), ("esc", "top"), ("n", "new session"), ("s", "snooze"),
-                ("u", "unwait"), ("p", "priority"), ("d", "done"), ("r", "rescore"), ("q", "quit")]
+                ("u", "unwait"), ("p", "priority"), ("d", "done"), ("r", "rescore"), ("t", "theme"),
+                ("q", "quit")]
         if self.cfg.get("hotkeys"):
             hk = self.cfg["hotkey_go"].replace("ctrl", "⌃").replace("option", "⌥").replace("+", "").upper()
             keys.insert(3, (hk, "go to top"))
         wide = "  " + "   ".join(self._key(c, label) for c, label in keys)
         if width(wide) <= shutil.get_terminal_size((100, 40)).columns - 1:
             return wide
+        if P.get("keys"):  # the key bar keeps its fields, with one-word labels
+            return " " + " ".join(self._key(c, label.split()[-1]) for c, label in keys)
         return "  " + "  ".join(f"{fg(P['text'])}{B}{c}{R} {fg(P['dim'])}{label.split()[-1]}{R}" for c, label in keys)
 
     # ---- loops ------------------------------------------------------------

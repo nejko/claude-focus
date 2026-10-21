@@ -200,12 +200,30 @@ more amber, and the rest grey. Alerts are red: a wake-up that could not be
 typed, a duplicate window, a session without a pane. What needs you is
 bright, PENDING and WORKING are softer, and FREE is grey. The selected row
 has a tinted background and a ▌ at the left. The screen uses 24-bit color
-and follows the theme: iTerm2's, or macOS's in herdr.
+and follows the terminal's dark or light appearance: iTerm2's, or macOS's
+in herdr.
+
+### Themes
+
+`t` switches to the next theme and keeps it in the config (`"theme"`).
+There are two:
+
+- `default`: the look described above, on the terminal's own background.
+- `norton`: Norton Commander. Blue background, the list in a double-line
+  frame, a black-on-cyan selection bar and title bar, and the keys in a
+  black-and-cyan key bar. It is the same in a dark and a light terminal.
+
+![The Norton Commander theme](docs/screenshot-norton.png)
+
+A theme is a palette in
+[claude_focus/look.py](claude_focus/look.py) (`THEMES`). A few keys in it
+change how the screen is drawn: `paint` (the screen paints its own
+background), `frame`, `select`, `bar`, `keys` and `keys_bg`.
 
 The selection starts on the first row of NEED YOU (else of YOUR TO-DOS).
 After Enter, it goes back there. The rows never move when the selection
 moves; a long list scrolls to keep the selected row visible. While the focus
-screen has the keys, its title bar is green.
+screen has the keys, its title bar is green (cyan in the Norton theme).
 
 ### Keys
 
@@ -221,6 +239,7 @@ screen has the keys, its title bar is green.
 | d | Done: nothing is needed now; the session comes back when it changes. On a to-do: your part is done |
 | r | Score the selected session again |
 | R | iTerm2: restore the windows of the last iTerm2 run (shown only when some are closed) |
+| t | Switch to the next theme (see "Themes") |
 | q | Quit |
 
 From anywhere: in iTerm2, two optional global hotkeys (`"hotkeys": true` in
@@ -548,6 +567,7 @@ remote machine show without a pane.
 | `poll_seconds` | `3` | How often the state is read |
 | `aging_points_per_hour`, `aging_max` | `0.15`, `10` | The bonus for waiting |
 | `terminal` | `"auto"` | `"auto"`, `"iterm"` or `"herdr"` (see "Which terminal") |
+| `theme` | `"default"` | The focus screen's look: `"default"` or `"norton"` (key `t` switches) |
 | `zoom` | `true` | Maximize (in herdr: zoom) the pane on Enter |
 | `return_after_answer` | `true` | Come back after you answer a question |
 | `new_session_command` | `"claude"` | What a new session in a free terminal runs, after `cd <folder> &&` |

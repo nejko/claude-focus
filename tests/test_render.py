@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import io
 import os
@@ -206,6 +207,49 @@ class LayoutTest(unittest.TestCase):
         self.app.pal = look.palette("light highContrast")
         raw = "\n".join(self.screen([self.short], "short", raw=True))
         self.assertIn(look.bg(look.mix(look.LIGHT["need"], look.LIGHT["bg"], 0.16)), raw)
+
+
+class ThemeTest(unittest.TestCase):
+    """Themes (config "theme", key t): the default one, and Norton Commander."""
+
+    setUp, screen = LayoutTest.setUp, LayoutTest.screen
+
+    def test_palettes(self):
+        self.assertIs(look.palette("dark"), look.DARK)
+        self.assertIs(look.palette("light", "default"), look.LIGHT)
+        self.assertIs(look.palette("light", "norton"), look.NORTON)  # blue in a light terminal too
+        self.assertIs(look.palette("dark", "no-such-theme"), look.DARK)
+
+    def test_t_switches_and_keeps_the_theme(self):
+        self.app.flash = mock.Mock()
+        self.assertEqual(self.app.cfg["theme"], "default")
+        asyncio.run(self.app.on_key("t"))
+        self.assertEqual((self.app.cfg["theme"], self.app.pal), ("norton", look.NORTON))
+        self.assertEqual(appmod.store.load_config()["theme"], "norton")
+        self.assertIn("Theme: norton", self.app.flash.call_args[0][0])
+        asyncio.run(self.app.on_key("t"))  # and round again
+        self.assertEqual((self.app.pal, appmod.store.load_config()["theme"]), (look.DARK, "default"))
+
+    def test_norton_commander(self):
+        self.app.pal = look.NORTON
+        raw = self.screen([self.short, self.long], "short", lines=30, raw=True)
+        screen = [ANSI.sub("", x) for x in raw]
+        self.assertEqual(len(screen), 30)
+        self.assertTrue(all(len(x) == 119 for x in screen))  # every line painted to the full width
+        self.assertTrue(all(x.startswith(look.bg(look.NORTON["bg"])) for x in raw[1:-1]))  # raw[0]: \033[H first
+        self.assertTrue(raw[-1].startswith(look.bg(look.NORTON["keys_bg"])))  # the key bar
+        self.assertTrue(screen[1].startswith("╔═") and screen[1].endswith("═╗"))
+        self.assertTrue(screen[-2].startswith("╚═") and screen[-2].endswith("═╝"))
+        self.assertTrue(all(x[0] in "║╟" and x[-1] in "║╢" for x in screen[2:-2]))
+        self.assertTrue(any(x.startswith("╟─ NEED YOU 1 ─") for x in screen))
+        row = next(x for x in raw if "short" in ANSI.sub("", x))
+        self.assertIn(look.bg((0, 170, 170)) + look.fg((0, 0, 0)), row)  # the selection bar: black on cyan
+        self.assertIn("go", screen[-1])
+
+    def test_the_default_theme_has_no_frame_and_no_paint(self):
+        raw = self.screen([self.short], "short", lines=30, raw=True)
+        self.assertFalse(any("║" in x or "╔" in x for x in raw))
+        self.assertNotIn(look.bg(look.DARK["bg"]), "".join(raw))
 
 
 class FormatTest(unittest.TestCase):

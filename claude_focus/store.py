@@ -34,6 +34,7 @@ DEFAULT_CONFIG = {
     "hotkeys": False,                   # iTerm2: only in a focus window; not in the service
     "hotkey_go": "ctrl+option+n",
     "hotkey_focus_window": "ctrl+option+f",
+    "theme": "default",                 # the focus screen's look: "default" or "norton" (look.THEMES); key t switches
     "zoom": True,
     "return_after_answer": True,        # after Enter on a question: come back when it is answered
     "free_profile": "Available",        # the iTerm2 profile (the green one) of a free terminal
