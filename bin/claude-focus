@@ -1,0 +1,4 @@
+#!/bin/sh
+# Runs claude-focus with the project venv (the iterm2 library lives there).
+ROOT="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
+PYTHONPATH="$ROOT" exec "$ROOT/.venv/bin/python" -m claude_focus "$@"

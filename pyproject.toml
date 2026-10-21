@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-focus"
+version = "0.1.0"
+description = "One priority queue over all your running Claude Code sessions in iTerm2"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [{name = "Nejc Skoberne"}]
+dependencies = ["iterm2>=2.25"]
+classifiers = [
+    "Environment :: Console",
+    "Environment :: MacOS X",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+]
+
+[project.optional-dependencies]
+jev = ["typesafe-sdk==0.7.0"]  # the jev scorer (config "scorer": "jev"; needs a TypeSafe key)
+
+[project.scripts]
+claude-focus = "claude_focus.cli:main"
+
+[tool.setuptools]
+packages = ["claude_focus"]
+
+[tool.setuptools.package-data]
+claude_focus = ["priorities.template.md"]
