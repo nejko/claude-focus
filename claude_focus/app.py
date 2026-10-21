@@ -146,6 +146,7 @@ class App:
         self.pick = None          # the folder picker: {"term": free terminal, "sel": row}
         self.folders = []         # its folders (see folders.candidates)
         self.matches = []         # the folders that match what the user typed (self.buf)
+        self.new_folder = None    # the folder it can create from what the user typed (folders.new_folder)
 
     # ---- data -------------------------------------------------------------
 
@@ -698,22 +699,32 @@ class App:
         self._search()
 
     def _search(self):
+        """The matching folders, then (one row more, selected when nothing
+        matches) the new folder that what the user typed would make."""
         self.matches = folders.search(self.folders, self.buf, short_path)
+        self.new_folder = folders.new_folder(self.buf, self.cfg["project_roots"])
         self.pick["sel"] = 0
 
-    async def start_session(self, term, path):
-        """Type `cd <folder> && claude` into a free terminal, give it the
-        session profile (iTerm2), and go there. Only into a pane that is still
-        at a bare shell; Ctrl-U first clears anything typed at its prompt."""
+    def _creating(self):
+        """True while the picker's selection is the new-folder row."""
+        return bool(self.new_folder) and self.pick["sel"] == len(self.matches)
+
+    async def start_session(self, term, path, create=False):
+        """Type `cd <folder> && claude` into a free terminal (with create,
+        `mkdir -p <folder> && ` first), give it the session profile (iTerm2),
+        and go there. Only into a pane that is still at a bare shell; Ctrl-U
+        first clears anything typed at its prompt."""
         info = {sid: (profile, job) for sid, _, profile, _, job in await self.bridge.pane_info()}
         profile, job = info.get(term["pane"], (None, None))
+        where = shlex.quote(path)
+        mkdir = f"mkdir -p {where} && " if create else ""
         if (job or "").lstrip("-") not in SHELLS or not await self.bridge.send_text(
-                term["pane"], f"\x15cd {shlex.quote(path)} && {self.cfg['new_session_command']}\r"):
+                term["pane"], f"\x15{mkdir}cd {where} && {self.cfg['new_session_command']}\r"):
             self.flash(f"The terminal {term['tty']} is not at a shell prompt any more: nothing started.")
             return
         if self.bridge.profiles and profile == self.cfg["free_profile"]:
             await self.bridge.set_profile(term["pane"], self.cfg["session_profile"])
-        store.log(f"new session in {short_path(path)} ({term['tty']})")
+        store.log(f"new session in {'a new folder ' if create else ''}{short_path(path)} ({term['tty']})")
         self.sel = None
         await self.bridge.go(term["pane"], zoom=self.cfg["zoom"])
 
@@ -892,14 +903,17 @@ class App:
                 self.buf += key
         elif self.mode == "folders":
             # Every letter goes into the search, n and q too; only Esc leaves.
-            term, n = self.pick["term"], len(self.matches)
+            term, n = self.pick["term"], len(self.matches) + bool(self.new_folder)
             if key == "\x1b":
                 self.mode = "main"
             elif key in ("\x1b[A", "\x1bOA", "\x1b[B", "\x1bOB") and n:
                 self.pick["sel"] = (self.pick["sel"] + (-1 if key[-1] == "A" else 1)) % n
             elif key in ("\r", "\n") and n:
                 self.mode = "main"
-                await self.start_session(term, self.matches[self.pick["sel"]][0])
+                if self._creating():
+                    await self.start_session(term, self.new_folder, create=True)
+                else:
+                    await self.start_session(term, self.matches[self.pick["sel"]][0])
             elif key == "\t":
                 self.mode = "main"
                 await self.go_terminal(term)
@@ -1038,22 +1052,30 @@ class App:
     def _folder_lines(self, w, room):
         """The folder picker: what the user typed, then the matching folders
         with the matched letters bright, and when a session last ran there.
-        The list scrolls to keep the selected folder in view."""
+        The list scrolls to keep the selected folder in view. Below it, the
+        new folder that what the user typed would make (always in view)."""
         P, acc, term = self.pal, self.pal["terminals"], self.pick["term"]
         dim = fg(P["dim"])
         lines = [self.section_title("terminals", f"NEW SESSION IN {term['tty']}", len(self.matches), w)]
-        hint = "" if self.buf else f"   {dim}type to search: a folder name, or its first letters{R}"
+        hint = "" if self.buf else f"   {dim}type to search: a folder name, its first letters, or a new name{R}"
         lines.append(f"  {fg(acc)}{B}›{R} {fg(P['text'])}{self.buf}{R}{fg(acc)}█{R}{hint}")
+        new = []
+        if self.new_folder:
+            on = self._creating()
+            line = (f"{fg(acc)}▌{R} " if on else "  ") + f"{fg(acc)}{B}+ new folder{R} " \
+                f"{fg(P['text'] if on else P['soft'])}{look.cut_left(short_path(self.new_folder), w - 20)}{R}"
+            new = [look.on(line, mix(acc, P["bg"], 0.16), w) if on else line]
         if not self.matches:
-            return lines + [f"  {dim}No folder matches.{R}"]
-        sel, show = self.pick["sel"], max(1, room - len(lines))
+            return lines + [f"  {dim}No folder matches.{R}"] + new
+        sel = min(self.pick["sel"], len(self.matches) - 1)
+        show = max(1, room - len(lines) - len(new))
         start = sel - show + 1 if sel >= show else 0
         shown = self.matches[start:start + show]
         texts = [short_path(p) for p, _, _ in shown]
         pw = min(max(map(len, texts)), w - 20)
         now = time.time()
         for n, ((_, when, used), text) in enumerate(zip(shown, texts)):
-            selected = start + n == sel
+            selected = start + n == self.pick["sel"]
             text = look.cut_left(text, pw)
             hit, tone = folders.marks(text, self.buf), fg(P["text"] if selected else P["soft"])
             body = "".join(f"{fg(acc)}{B}{c}{R}" if i in hit else f"{tone}{c}{R}" for i, c in enumerate(text))
@@ -1061,7 +1083,7 @@ class App:
                 f"{fmt_wait((now - when) / 3600)} ago"
             line = (f"{fg(acc)}▌{R} " if selected else "  ") + look.pad(body, pw) + f"  {dim}{age}{R}"
             lines.append(look.on(line, mix(acc, P["bg"], 0.16), w) if selected else line)
-        return lines
+        return lines + new
 
     def render(self):
         cols, rows_n = shutil.get_terminal_size((100, 40))
@@ -1145,7 +1167,8 @@ class App:
         if self.mode == "priority":
             return f"  {fg(P['need'])}{B}Priority{R} {fg(P['dim'])}1-100 (0 = automatic){R}  {fg(P['text'])}{self.buf}█{R}"
         if self.mode == "folders":
-            return "  " + "   ".join([self._key("⏎", f"cd there and run {self.cfg['new_session_command']}"),
+            make = "make it, " if self._creating() else ""
+            return "  " + "   ".join([self._key("⏎", f"{make}cd there and run {self.cfg['new_session_command']}"),
                                      self._key("↑↓", "select"), self._key("⇥", "just go to the terminal"),
                                      self._key("esc", "cancel")])
         keys = [("⏎", "go"), ("↑↓", "select"), ("esc", "top"), ("n", "new session"), ("s", "snooze"),

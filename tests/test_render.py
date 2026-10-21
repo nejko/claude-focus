@@ -2,6 +2,9 @@ import contextlib
 import io
 import os
 import re
+import shlex
+import shutil
+import tempfile
 import time
 import unittest
 from unittest import mock
@@ -244,6 +247,10 @@ class TerminalTest(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.app.sessions = [{"pid": 7, "sessionId": "c", "key": "c", "tty": "ttys012"},
                              {"pid": 8, "sessionId": "bg", "key": "bg", "tty": ""}]
+        self.root = tempfile.mkdtemp()  # the project folder that a new folder goes into
+        self.addCleanup(shutil.rmtree, self.root)
+        os.makedirs(os.path.join(self.root, "api"))
+        self.app.cfg = dict(self.app.cfg, project_roots=[self.root])
 
     def free(self):
         import asyncio
@@ -307,6 +314,42 @@ class TerminalTest(unittest.TestCase):
         self.app.bridge.go.assert_not_awaited()
         self.assertIn("not at a shell prompt", self.app.flash.call_args[0][0])
 
+    def typed_new_folder(self, name):
+        path = shlex.quote(os.path.join(self.root, name))
+        self.app.bridge.send_text.assert_awaited_once_with(
+            "p2", f"\x15mkdir -p {path} && cd {path} && claude\r")
+        self.assertFalse(os.path.exists(os.path.join(self.root, name)))  # the shell makes it, not this process
+
+    def test_a_new_name_offers_a_new_folder(self):
+        self.keys("n", "z", "z")
+        self.assertEqual((self.app.matches, self.app.new_folder), ([], os.path.join(self.root, "zz")))
+        self.assertTrue(self.app._creating())  # nothing matches: the new folder is selected
+        self.keys("\r")
+        self.typed_new_folder("zz")
+        self.app.bridge.go.assert_awaited_once_with("p2", zoom=True)
+
+    def test_up_from_the_top_selects_the_new_folder(self):
+        self.keys("n", "a")
+        self.assertEqual(len(self.app.matches), 2)
+        self.assertFalse(self.app._creating())  # Enter still takes the best match
+        self.keys("\x1b[A")  # the list wraps: the row below the last folder
+        self.assertTrue(self.app._creating())
+        self.keys("\r")
+        self.typed_new_folder("a")
+
+    def test_no_new_folder_for_one_that_exists(self):
+        self.keys("n", "a", "p", "i")
+        self.assertIsNone(self.app.new_folder)
+        self.keys("\x1b[A")
+        self.assertFalse(self.app._creating())
+
+    def test_new_folder_row_on_the_screen(self):
+        self.keys("n", "q", "x")
+        screen = self.picker_screen()
+        self.assertTrue(any("No folder matches." in x for x in screen))
+        self.assertTrue(any(x.startswith("▌ + new folder") and x.rstrip().endswith("/qx") for x in screen))
+        self.assertTrue(any("make it, cd there and run claude" in x for x in screen))
+
     def test_backspace_ctrl_u_and_esc(self):
         self.keys("n", "q", "x")
         self.assertEqual(self.app.matches, [])
@@ -317,17 +360,21 @@ class TerminalTest(unittest.TestCase):
         self.keys("\x1b")
         self.assertEqual(self.app.mode, "main")
 
-    def test_picker_screen(self):
-        self.keys("n", "q", "n")
+    def picker_screen(self):
         out = io.StringIO()
         with mock.patch.dict(os.environ, {"COLUMNS": "120", "LINES": "30"}), contextlib.redirect_stdout(out):
             self.app.last_frame = None
             self.app.render()
-        screen = [ANSI.sub("", x) for x in out.getvalue().replace("\033[K", "").split("\n")]
+        return [ANSI.sub("", x) for x in out.getvalue().replace("\033[K", "").split("\n")]
+
+    def test_picker_screen(self):
+        self.keys("n", "q", "n")
+        screen = self.picker_screen()
         self.assertTrue(any("NEW SESSION IN ttys002" in x for x in screen))
         self.assertTrue(any(x.startswith("▌ /Users/ana/quantum notes") and "ago" in x for x in screen))
         self.assertTrue(any("› qn" in x for x in screen))
-        self.assertTrue(any("cd there and run claude" in x for x in screen))
+        self.assertTrue(any("cd there and run claude" in x and "make it" not in x for x in screen))
+        self.assertTrue(any(x.startswith("  + new folder") for x in screen))  # below the list, not selected
         self.assertFalse(any("NEED YOU" in x for x in screen))
         self.assertTrue(all(len(x) <= 119 for x in screen))
 

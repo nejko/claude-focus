@@ -108,3 +108,20 @@ def search(folders, query, show=lambda p: p):
         ranked = [(0, n, f) for n, (f, text) in enumerate(zip(folders, texts))
                   if _abbreviation(" ".join(words), text) is not None]
     return [f for _, _, f in sorted(ranked)]
+
+
+def new_folder(text, roots):
+    """The folder that the picker offers to create from what the user typed:
+    a path as typed when it starts with ~ or /, else a folder of that name
+    (or subpath) in the first of roots that exists, else in the home folder.
+    None when nothing is typed or the path exists already."""
+    text = text.strip()
+    if not text:
+        return None
+    if text.startswith(("~", "/")):
+        path = os.path.expanduser(text)
+    else:
+        base = next((r for r in map(os.path.expanduser, roots) if os.path.isdir(r)), os.path.expanduser("~"))
+        path = os.path.join(base, text)
+    path = os.path.normpath(path)
+    return None if os.path.lexists(path) else path

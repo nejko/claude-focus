@@ -116,5 +116,32 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(folders.marks("~/x/ultima", ""), set())
 
 
+class NewFolderTest(unittest.TestCase):
+    """The folder that the picker offers to create from what the user typed."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.root = os.path.join(self.tmp, "Projects")
+        os.makedirs(os.path.join(self.root, "api"))
+        self.roots = [os.path.join(self.tmp, "missing"), self.root]
+
+    def test_a_name_goes_into_the_first_project_folder_that_exists(self):
+        self.assertEqual(folders.new_folder(" bine-app ", self.roots), os.path.join(self.root, "bine-app"))
+        self.assertEqual(folders.new_folder("clients/acme", self.roots), os.path.join(self.root, "clients", "acme"))
+
+    def test_a_path_as_typed(self):
+        self.assertEqual(folders.new_folder(self.tmp + "/notes/", self.roots), os.path.join(self.tmp, "notes"))
+        self.assertEqual(folders.new_folder("~/x-new-folder", self.roots), os.path.expanduser("~/x-new-folder"))
+
+    def test_without_a_project_folder_the_home_folder(self):
+        self.assertEqual(folders.new_folder("x", [self.roots[0]]), os.path.join(os.path.expanduser("~"), "x"))
+
+    def test_nothing_typed_or_the_folder_exists(self):
+        self.assertIsNone(folders.new_folder("  ", self.roots))
+        self.assertIsNone(folders.new_folder("api", self.roots))
+        self.assertIsNone(folders.new_folder(self.root, self.roots))
+
+
 if __name__ == "__main__":
     unittest.main()

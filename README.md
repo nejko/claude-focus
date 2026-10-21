@@ -372,6 +372,14 @@ path, and a folder whose own name starts with the first word comes first.
 When no path has what you typed, the letters are an abbreviation of the
 folder's name: `clfo` finds `claude-focus`.
 
+To start in a new folder, type its name. Below the list, `+ new folder`
+shows where it goes: into the first of your project folders
+(`project_roots`) that exists, or to the path you typed when it starts with
+`~` or `/` (`clients/acme` makes both levels). When no folder matches, it is
+selected; otherwise ↑ on the first row reaches it. Enter on it types
+`mkdir -p <folder> && cd <folder> && claude`. It shows only for a folder
+that does not exist yet.
+
 - Enter types `cd <folder> && claude` into the terminal (Ctrl-U first, so
   anything typed at its prompt goes away) and takes you there; in iTerm2 the
   pane also gets back your default profile. `new_session_command` sets the
