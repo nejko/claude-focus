@@ -14,6 +14,7 @@ import _env  # noqa: E402,F401  (first: a scratch CLAUDE_FOCUS_DIR)
 
 from claude_focus import app as appmod  # noqa: E402
 from claude_focus import iterm, look  # noqa: E402
+from claude_focus.themes import NORTON  # noqa: E402
 
 STAMP = 1790915096936
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
@@ -217,27 +218,29 @@ class ThemeTest(unittest.TestCase):
     def test_palettes(self):
         self.assertIs(look.palette("dark"), look.DARK)
         self.assertIs(look.palette("light", "default"), look.LIGHT)
-        self.assertIs(look.palette("light", "norton"), look.NORTON)  # blue in a light terminal too
+        self.assertIs(look.palette("light", "norton"), NORTON)  # blue in a light terminal too
         self.assertIs(look.palette("dark", "no-such-theme"), look.DARK)
 
     def test_t_switches_and_keeps_the_theme(self):
         self.app.flash = mock.Mock()
         self.assertEqual(self.app.cfg["theme"], "default")
         asyncio.run(self.app.on_key("t"))
-        self.assertEqual((self.app.cfg["theme"], self.app.pal), ("norton", look.NORTON))
+        self.assertEqual((self.app.cfg["theme"], self.app.pal), ("norton", NORTON))
         self.assertEqual(appmod.store.load_config()["theme"], "norton")
-        self.assertIn("Theme: norton", self.app.flash.call_args[0][0])
-        asyncio.run(self.app.on_key("t"))  # and round again
+        self.assertIn("norton", self.app.flash.call_args[0][0])
+        asyncio.run(self.app.on_key("T"))  # back
         self.assertEqual((self.app.pal, appmod.store.load_config()["theme"]), (look.DARK, "default"))
+        asyncio.run(self.app.on_key("T"))  # and round: the last theme
+        self.assertEqual(self.app.cfg["theme"], list(look.THEMES)[-1])
 
     def test_norton_commander(self):
-        self.app.pal = look.NORTON
+        self.app.pal = NORTON
         raw = self.screen([self.short, self.long], "short", lines=30, raw=True)
         screen = [ANSI.sub("", x) for x in raw]
         self.assertEqual(len(screen), 30)
         self.assertTrue(all(len(x) == 119 for x in screen))  # every line painted to the full width
-        self.assertTrue(all(x.startswith(look.bg(look.NORTON["bg"])) for x in raw[1:-1]))  # raw[0]: \033[H first
-        self.assertTrue(raw[-1].startswith(look.bg(look.NORTON["keys_bg"])))  # the key bar
+        self.assertTrue(all(x.startswith(look.bg(NORTON["bg"])) for x in raw[1:-1]))  # raw[0]: \033[H first
+        self.assertTrue(raw[-1].startswith(look.bg(NORTON["keys"]["bg"])))  # the key bar
         self.assertTrue(screen[1].startswith("╔═") and screen[1].endswith("═╗"))
         self.assertTrue(screen[-2].startswith("╚═") and screen[-2].endswith("═╝"))
         self.assertTrue(all(x[0] in "║╟" and x[-1] in "║╢" for x in screen[2:-2]))
@@ -245,6 +248,22 @@ class ThemeTest(unittest.TestCase):
         row = next(x for x in raw if "short" in ANSI.sub("", x))
         self.assertIn(look.bg((0, 170, 170)) + look.fg((0, 0, 0)), row)  # the selection bar: black on cyan
         self.assertIn("go", screen[-1])
+
+    def test_every_theme_draws_whole_lines(self):
+        for name in look.THEMES:
+            for appearance in ("dark", "light"):
+                with self.subTest(theme=name, appearance=appearance):
+                    P = self.app.pal = look.palette(appearance, name)
+                    self.assertTrue(all(k in P for k in look.DARK), "a palette has every color of the default")
+                    screen = self.screen([self.short, self.long], "short", lines=30)
+                    self.assertEqual(len(screen), 30)
+                    self.assertTrue(all(len(x) <= 119 for x in screen))
+                    if P.get("frame"):
+                        box = P.get("box") or "╔═╗║╚╝╟╢"
+                        self.assertTrue(screen[1].startswith(box[0]) and screen[1].endswith(box[2]))
+                        self.assertTrue(screen[-2].startswith(box[4]) and screen[-2].endswith(box[5]))
+                        self.assertTrue(all(len(x) == 119 and x[0] in box[3] + box[6] for x in screen[2:-2]))
+                    self.assertIn("go", screen[-1])
 
     def test_the_default_theme_has_no_frame_and_no_paint(self):
         raw = self.screen([self.short], "short", lines=30, raw=True)

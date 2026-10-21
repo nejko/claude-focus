@@ -6,6 +6,8 @@ PENDING amber, WORKING cyan, FREE grey, free terminals green. The screen
 needs no iTerm2 profile for them."""
 import re
 
+from .themes import THEMES as MORE_THEMES
+
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 R, B = "\033[0m", "\033[1m"
 EIGHTHS = "▏▎▍▌▋▊▉█"
@@ -41,24 +43,7 @@ LIGHT = {
     "high": (200, 40, 40), "mid": (168, 104, 0), "low": (118, 126, 138),
 }
 
-# Norton Commander: the 16 colors of a DOS screen, the same in a dark and a
-# light terminal. Besides the colors, the keys below say how App.render
-# draws a theme; the default theme has none of them.
-NORTON = {
-    "bg": (0, 0, 170),
-    "text": (255, 255, 255), "soft": (85, 255, 255), "dim": (0, 170, 170), "faint": (0, 170, 170),
-    "track": (0, 0, 110), "key": (0, 0, 0), "alert": (255, 85, 85),
-    "need": (255, 255, 85), "todo": (255, 255, 255), "pending": (255, 85, 255),
-    "working": (85, 255, 255), "free": (0, 170, 170), "terminals": (85, 255, 85),
-    "high": (255, 85, 85), "mid": (255, 255, 85), "low": (0, 170, 170),
-    "paint": True,                         # the screen paints its own background (else the terminal's shows)
-    "frame": (85, 255, 255),               # the list in a double-line frame of this color
-    "select": ((0, 0, 0), (0, 170, 170)),  # the selected row all in these colors: black on cyan
-    "bar": ((0, 0, 0), (0, 170, 170)),     # the title bar while the window has the keys
-    "keys": ((255, 255, 255), (0, 0, 0), (0, 0, 0), (0, 170, 170)),  # a key white on black, its label black on cyan
-    "keys_bg": (0, 0, 0),                  # the line of the keys
-}
-THEMES = {"default": (DARK, LIGHT), "norton": (NORTON, NORTON)}  # name -> (dark, light); key t switches
+THEMES = {"default": (DARK, LIGHT), **MORE_THEMES}  # name -> (dark, light); key t switches (themes.py)
 
 
 def palette(appearance, theme="default"):

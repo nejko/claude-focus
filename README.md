@@ -205,25 +205,44 @@ in herdr.
 
 ### Themes
 
-`t` switches to the next theme and keeps it in the config (`"theme"`).
-There are two:
+`t` switches to the next theme and `T` to the one before; the theme stays
+in the config (`"theme"`). There are seven:
 
 - `default`: the look described above, on the terminal's own background.
-- `norton`: Norton Commander. Blue background, the list in a double-line
-  frame, a black-on-cyan selection bar and title bar, and the keys in a
-  black-and-cyan key bar. It is the same in a dark and a light terminal.
+- `norton`: Norton Commander. Light cyan on blue in a double-line frame, a
+  black-on-cyan selection bar, and a key bar with the keys white on black
+  and their labels black on cyan.
+- `qbasic`: Microsoft QBasic. Light grey on blue in a single-line window
+  titled `Untitled`, the title line black on grey, and the keys as
+  `<n=session>` on a cyan status line.
+- `turbo-pascal`: Borland Turbo Pascal 7. Yellow on blue in a white
+  double-line window titled `FOCUS.PAS`, the selection black on green, and
+  a grey status line with red key names.
+- `clipper`: a Clipper business application (`SET COLOR TO W+/B,N/W`).
+  White on blue in a double-line box, with the highlight bar and the status
+  line black on grey.
+- `total-commander`: Total Commander on classic Windows. Black on white,
+  the title line and the cursor bar white on navy, and grey key buttons.
+- `claude-code`: Claude Code's own colors on the terminal's background, in
+  its dark or light version. Claude orange for what needs you, a rounded
+  box titled `✻ claude-focus`, and the selected row in its suggestion blue
+  with a `❯`.
 
-![The Norton Commander theme](docs/screenshot-norton.png)
+The retro themes paint their own background, so they look the same in a
+dark and a light terminal. Their colors come from the programs where a
+source exists: the MS-DOS 6.0 source for QBasic, `TURBO.EXE` 7.01 for Turbo
+Pascal, and Claude Code 2.1.306 for Claude Code.
 
-A theme is a palette in
-[claude_focus/look.py](claude_focus/look.py) (`THEMES`). A few keys in it
-change how the screen is drawn: `paint` (the screen paints its own
-background), `frame`, `select`, `bar`, `keys` and `keys_bg`.
+![The themes](docs/themes.png)
+
+A theme is a palette in [claude_focus/themes.py](claude_focus/themes.py).
+Its docstring lists the keys that change how the screen is drawn: `paint`,
+`frame`, `box`, `title`, `select`, `marker`, `bar` and `keys`.
 
 The selection starts on the first row of NEED YOU (else of YOUR TO-DOS).
 After Enter, it goes back there. The rows never move when the selection
 moves; a long list scrolls to keep the selected row visible. While the focus
-screen has the keys, its title bar is green (cyan in the Norton theme).
+screen has the keys, its title bar is green (in a theme, the theme's color).
 
 ### Keys
 
@@ -239,7 +258,7 @@ screen has the keys, its title bar is green (cyan in the Norton theme).
 | d | Done: nothing is needed now; the session comes back when it changes. On a to-do: your part is done |
 | r | Score the selected session again |
 | R | iTerm2: restore the windows of the last iTerm2 run (shown only when some are closed) |
-| t | Switch to the next theme (see "Themes") |
+| t, T | Switch to the next theme, or to the one before (see "Themes") |
 | q | Quit |
 
 From anywhere: in iTerm2, two optional global hotkeys (`"hotkeys": true` in
@@ -567,7 +586,7 @@ remote machine show without a pane.
 | `poll_seconds` | `3` | How often the state is read |
 | `aging_points_per_hour`, `aging_max` | `0.15`, `10` | The bonus for waiting |
 | `terminal` | `"auto"` | `"auto"`, `"iterm"` or `"herdr"` (see "Which terminal") |
-| `theme` | `"default"` | The focus screen's look: `"default"` or `"norton"` (key `t` switches) |
+| `theme` | `"default"` | The focus screen's look: `"default"`, `"norton"`, `"qbasic"`, `"turbo-pascal"`, `"clipper"`, `"total-commander"` or `"claude-code"` (keys `t` and `T` switch) |
 | `zoom` | `true` | Maximize (in herdr: zoom) the pane on Enter |
 | `return_after_answer` | `true` | Come back after you answer a question |
 | `new_session_command` | `"claude"` | What a new session in a free terminal runs, after `cd <folder> &&` |

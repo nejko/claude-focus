@@ -16,7 +16,7 @@ import tty as ttymod
 from . import costs, folders, look
 from . import pending as pend
 from . import queue as q
-from . import restore, scorer, sessions as sessions_mod, store, terminal
+from . import restore, scorer, sessions as sessions_mod, store, terminal, themes
 from .look import B, R, bg, fg, fit, mix, width
 from .screen import EMPTY
 from .terminal import SHELLS
@@ -752,16 +752,16 @@ class App:
         self.sel = None
         await self.bridge.go(term["pane"], zoom=self.cfg["zoom"])
 
-    def next_theme(self):
-        """Key t: the next theme of look.THEMES, kept in the config."""
+    def next_theme(self, step=1):
+        """Key t: the next theme of look.THEMES (T: the one before), kept in the config."""
         names = list(look.THEMES)
         now = self.cfg["theme"]
-        name = names[(names.index(now) + 1) % len(names)] if now in names else names[0]
+        name = names[(names.index(now) + step) % len(names)] if now in names else names[0]
         self.cfg["theme"] = name
         self.pal = look.palette(self.appearance, name)
         store.ensure()
         store._write(store.CONFIG, dict(store._read(store.CONFIG, {}), theme=name))
-        self.flash(f"Theme: {name}. t switches to the next one ({', '.join(names)}).")
+        self.flash(f"Theme {names.index(name) + 1} of {len(names)}: {name}. t: the next one, T: the one before.")
 
     def _update_selected(self, fn, done_text):
         sec, item = self.selected()
@@ -867,8 +867,8 @@ class App:
                 self.sel = None
             elif key == "n":
                 await self.pick_folder()
-            elif key == "t":
-                self.next_theme()
+            elif key in ("t", "T"):
+                self.next_theme(1 if key == "t" else -1)
             elif sec == "terminals" and key in ("s", "p", "d", "u", "r"):
                 self.flash("A free terminal: Enter starts a new session in it.")
             elif key == "s" and item:
@@ -1064,7 +1064,7 @@ class App:
         name_tone, text_tone = ("text", "text") if selected else self.TONE[sec]
         name = look.cut(item["s"].get("name") or "?", cols["name"])
         name = f"{fg(P[name_tone])}{B if name_tone != 'dim' else ''}{name}{R}"
-        mark = f"{fg(P[sec])}▌{R} " if selected else "  "
+        mark = f"{fg(P[sec])}{P.get('marker', '▌')}{R} " if selected else "  "
         line = (mark + look.pad(lead, cols["lead"]) + look.pad(f"{fg(P['dim'])}{age}{R}", cols["age"], right=True)
                 + "  " + look.pad(name, cols["name"]) + "  ")
         if cols["path"]:
@@ -1077,11 +1077,12 @@ class App:
 
     def _on(self, line, color, w):
         """The selected row: on a tint of its section's color; in a theme with
-        a selection bar (Norton Commander), all in the bar's colors."""
+        "select", all in one color, on its bar (or none)."""
         P = self.pal
         if P.get("select"):
             text, back = P["select"]
-            return look.on(fg(text) + look.ANSI.sub("", line), back, w)
+            plain = fg(text) + look.ANSI.sub("", line)
+            return look.on(plain, back, w) if back else look.pad(fit(plain, w), w) + R
         return look.on(line, mix(color, P["bg"], 0.16), w)
 
     def section_title(self, sec, title, n, w):
@@ -1096,9 +1097,23 @@ class App:
     def _framed(self, line, inner):
         """A line of the list inside the theme's frame. A section title (it
         starts with ─) joins the frame as a divider."""
-        fc = fg(self.pal["frame"])
-        side = "╟╢" if look.ANSI.sub("", line).startswith("─") else "║║"
+        box, fc = self.pal.get("box") or themes.DOUBLE, fg(self.pal["frame"])
+        side = box[6:8] if look.ANSI.sub("", line).startswith("─") else box[3] * 2
         return f"{fc}{side[0]}{R}" + look.pad(fit(line, inner), inner) + f"{fc}{side[1]}{R}"
+
+    def _border(self, inner, top):
+        """The top or the bottom line of the theme's frame; the top one can
+        carry the theme's title in its middle."""
+        P = self.pal
+        box, fc = P.get("box") or themes.DOUBLE, fg(P["frame"])
+        left, right = (box[0], box[2]) if top else (box[4], box[5])
+        text, tf, tb = (P.get("title") if top else None) or ("", None, None)
+        if not text:
+            return f"{fc}{left}{box[1] * inner}{right}{R}"
+        text = look.cut(f" {text} ", inner)
+        a = (inner - len(text)) // 2
+        return (f"{fc}{left}{box[1] * a}{R}{fg(tf)}{bg(tb) if tb else ''}{text}{R}"
+                f"{fc}{box[1] * (inner - a - len(text))}{right}{R}")
 
     def _title_line(self, v, w, now):
         P = self.pal
@@ -1133,7 +1148,7 @@ class App:
         new = []
         if self.new_folder:
             on = self._creating()
-            line = (f"{fg(acc)}▌{R} " if on else "  ") + f"{fg(acc)}{B}+ new folder{R} " \
+            line = (f"{fg(acc)}{P.get('marker', '▌')}{R} " if on else "  ") + f"{fg(acc)}{B}+ new folder{R} " \
                 f"{fg(P['text'] if on else P['soft'])}{look.cut_left(short_path(self.new_folder), w - 20)}{R}"
             new = [self._on(line, acc, w) if on else line]
         if not self.matches:
@@ -1151,7 +1166,8 @@ class App:
             hit, tone = folders.marks(text, self.buf), fg(P["text"] if selected else P["soft"])
             body = "".join(f"{fg(acc)}{B}{c}{R}" if i in hit else f"{tone}{c}{R}" for i, c in enumerate(text))
             age = ago(when) if used else "no recent session"
-            line = (f"{fg(acc)}▌{R} " if selected else "  ") + look.pad(body, pw) + f"  {dim}{age}{R}"
+            line = (f"{fg(acc)}{P.get('marker', '▌')}{R} " if selected else "  ") + look.pad(body, pw) \
+                + f"  {dim}{age}{R}"
             lines.append(self._on(line, acc, w) if selected else line)
         return lines + new
 
@@ -1171,7 +1187,7 @@ class App:
         lw = max(len(label) for _, label, _ in START_KINDS)  # the commands in one column
         for i, (key, label, flags) in enumerate(START_KINDS):
             on = i == self.pick["kind"]
-            line = ((f"{fg(acc)}▌{R} " if on else "  ") + f"{fg(acc)}{B}{key}{R}  "
+            line = ((f"{fg(acc)}{P.get('marker', '▌')}{R} " if on else "  ") + f"{fg(acc)}{B}{key}{R}  "
                     f"{fg(P['text'] if on else P['soft'])}{look.pad(label, lw)}{R}"
                     f"   {dim}{self.cfg['new_session_command']}{flags}{R}")
             lines.append(self._on(line, acc, w) if on else line)
@@ -1195,11 +1211,11 @@ class App:
                              f"Press R to restore them.{R}")
         frame = P.get("frame")  # a theme that frames the list (Norton Commander): two columns less inside
         inner = w - 2 if frame else w
-        top_lines.append(f"{fg(frame)}╔{'═' * inner}╗{R}" if frame else "")
+        top_lines.append(self._border(inner, top=True) if frame else "")
 
         # The keys are the last line of the screen, the flash just above the rule.
         bottom_lines = [f"  {fg(P['working'])}{self.msg}{R}" if self.msg and time.time() < self.msg_until else "",
-                        f"{fg(frame)}╚{'═' * inner}╝{R}" if frame else fg(P["faint"]) + "─" * w + R]
+                        self._border(inner, top=False) if frame else fg(P["faint"]) + "─" * w + R]
         if self.mode == "restore" and self.restore_lines:
             bottom_lines += [f"  {fg(P['pending'])}{B}{self.restore_lines[0]}{R}"]
             bottom_lines += [f"  {fg(P['text'])}{line}{R}" for line in self.restore_lines[1:]] + [""]
@@ -1239,7 +1255,8 @@ class App:
             bottom_lines[0] = self._framed(bottom_lines[0], inner)
         lines = [fit(x, w) for x in top_lines + shown + bottom_lines]
         if P.get("paint"):  # every line on the theme's background, the keys on theirs; \033[K fills the rest
-            lines = [look.on(x, P["keys_bg"] if n == len(lines) - 1 else P["bg"], w)[:-len(R)]
+            keys_bg = (P.get("keys") or {}).get("bg") or P["bg"]
+            lines = [look.on(x, keys_bg if n == len(lines) - 1 else P["bg"], w)[:-len(R)]
                      for n, x in enumerate(lines)]
         frame = "\n".join(lines)
         if frame == self.last_frame:
@@ -1252,19 +1269,25 @@ class App:
 
     def _key(self, cap, label):
         P = self.pal
-        if P.get("keys"):  # a key bar: the key, then its label in a field of its own
-            cap_fg, cap_bg, label_fg, label_bg = P["keys"]
-            return f"{bg(cap_bg)}{fg(cap_fg)}{B}{cap}{R}{bg(label_bg)}{fg(label_fg)} {label} {R}"
+        k = P.get("keys")
+        if k:  # the theme's key line: the key, then its label, each in its own colors and format
+            (cap_fg, cap_bg), (label_fg, label_bg) = k["cap"], k["label"]
+            return (f"{bg(cap_bg) if cap_bg else ''}{fg(cap_fg)}{B}{k['fmt'][0].format(cap)}{R}"
+                    f"{bg(label_bg) if label_bg else ''}{fg(label_fg)}{k['fmt'][1].format(label)}{R}")
         return f"{bg(P['key'])}{fg(P['text'])}{B} {cap} {R} {fg(P['dim'])}{label}{R}"
+
+    def _sep(self):
+        """What stands between two keys of the key line."""
+        return (self.pal.get("keys") or {}).get("sep", "   ")
 
     def _keys_line(self, now):
         P = self.pal
         if self.mode == "restore":
-            return "  " + "   ".join([self._key("y", "open them"), self._key("n", "no, do not offer this layout again"),
+            return "  " + self._sep().join([self._key("y", "open them"), self._key("n", "no, do not offer this layout again"),
                                      self._key("esc", "back")])
         if self.mode == "snooze":
             opts = [self._key(k, label) for k, label, _ in q.snooze_presets(now)]
-            return (f"  {fg(P['pending'])}{B}Snooze until{R}   " + "   ".join(
+            return (f"  {fg(P['pending'])}{B}Snooze until{R}   " + self._sep().join(
                 opts + [self._key("t", "type a time"), self._key("esc", "cancel")]))
         if self.mode == "snooze_time":
             return (f"  {fg(P['pending'])}{B}Snooze until{R} {fg(P['dim'])}(HH:MM, +2h, +1d, "
@@ -1272,14 +1295,14 @@ class App:
         if self.mode == "priority":
             return f"  {fg(P['need'])}{B}Priority{R} {fg(P['dim'])}1-100 (0 = automatic){R}  {fg(P['text'])}{self.buf}█{R}"
         if self.mode == "start":
-            return "  " + "   ".join([self._key("⏎", "start"), self._key("↑↓", "select"),
+            return "  " + self._sep().join([self._key("⏎", "start"), self._key("↑↓", "select"),
                                      self._key("⇥", "just go to the terminal"), self._key("esc", "back to the folders")])
         if self.mode == "folders":
             match = self.matches[self.pick["sel"]] if self.pick["sel"] < len(self.matches) else None
             what = (f"make it, cd there and run {self.cfg['new_session_command']}" if self._creating() else
                     "start there: new, continue or resume" if match and match[2] else
                     f"cd there and run {self.cfg['new_session_command']}")
-            return "  " + "   ".join([self._key("⏎", what),
+            return "  " + self._sep().join([self._key("⏎", what),
                                      self._key("↑↓", "select"), self._key("⇥", "just go to the terminal"),
                                      self._key("esc", "cancel")])
         keys = [("⏎", "go"), ("↑↓", "select"), ("esc", "top"), ("n", "new session"), ("s", "snooze"),
@@ -1288,11 +1311,11 @@ class App:
         if self.cfg.get("hotkeys"):
             hk = self.cfg["hotkey_go"].replace("ctrl", "⌃").replace("option", "⌥").replace("+", "").upper()
             keys.insert(3, (hk, "go to top"))
-        wide = "  " + "   ".join(self._key(c, label) for c, label in keys)
+        wide = "  " + self._sep().join(self._key(c, label) for c, label in keys)
         if width(wide) <= shutil.get_terminal_size((100, 40)).columns - 1:
             return wide
         if P.get("keys"):  # the key bar keeps its fields, with one-word labels
-            return " " + " ".join(self._key(c, label.split()[-1]) for c, label in keys)
+            return " " + (self._sep().strip() or " ").join(self._key(c, label.split()[-1]) for c, label in keys)
         return "  " + "  ".join(f"{fg(P['text'])}{B}{c}{R} {fg(P['dim'])}{label.split()[-1]}{R}" for c, label in keys)
 
     # ---- loops ------------------------------------------------------------
