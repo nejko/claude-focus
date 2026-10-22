@@ -112,6 +112,16 @@ class LayoutTest(unittest.TestCase):
         self.assertIn("◌ shells  Pick a design on the page", screen[rows["pick"]])
         self.assertNotIn("shells", screen[rows["short"]])
 
+    def test_a_seen_report_says_seen(self):
+        item = dict(need("rep", "Deployed; the site is live"), seen=True, why="Deployed; the site is live")
+        self.app.view = {"need": [], "todo": [], "working": [], "pending": [], "free": [item], "terminals": []}
+        self.app.sel, self.app.last_frame = None, None
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"COLUMNS": "120", "LINES": "30"}), contextlib.redirect_stdout(out):
+            self.app.render()
+        screen = [ANSI.sub("", x) for x in out.getvalue().replace("\033[K", "").split("\n")]
+        self.assertIn("seen", screen[self.rows_at(screen, ["rep"])["rep"]])
+
     def test_green_title_bar_only_while_the_window_has_the_keys(self):
         for focused in (True, False):
             self.app.focused = focused

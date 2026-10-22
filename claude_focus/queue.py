@@ -84,15 +84,25 @@ def open_needs(p):
     return p.get("needs") if p and not p.get("needs_done") else None
 
 
-def shell_asks_user(s, e, sc):
+def seen_report(state, s, sc):
+    """The turn only reported (kind info), and the user has seen it: their
+    keys were in its pane after the turn ended (state "seen", App._note_seen).
+    It needs nothing more from them. A decision, an action, a review or a
+    login stays: seeing it is not doing it."""
+    seen = state.get("seen", {}).get(s["sessionId"])
+    return bool(sc) and sc.get("kind") == "info" and bool(seen) and seen > s["statusSince"]
+
+
+def shell_asks_user(state, s, e, sc):
     """A shell session (its turn ended, background shells it started still
     run) usually waits for its own work and stays under WORKING. It needs the
     user when its turn ended with a request: pick a design on a page that a
     background server shows, try a dev server. The scorer has read that turn
     and did not say that nothing is needed, and the user has not marked it
-    done (then it is working again: the shells wake it when they end)."""
+    done or seen its report (then it is working again: the shells wake it
+    when they end)."""
     return (s["status"] == "shell" and bool(sc) and not nothing_needed(sc)
-            and e.get("dismissed_stamp") != s["statusSince"])
+            and e.get("dismissed_stamp") != s["statusSince"] and not seen_report(state, s, sc))
 
 
 def hidden_by_wait(state, s):
@@ -117,7 +127,7 @@ def classify(sessions, state, now, cfg):
         e = entry(state, s["key"])
         stamp = s["statusSince"]
         item = {"s": s, "e": e, "score": e.get("score"), "fresh": fresh_score(e, stamp)}
-        if working(s) and not shell_asks_user(s, e, item["fresh"]):
+        if working(s) and not shell_asks_user(state, s, e, item["fresh"]):
             out["working"].append(item)
             continue
         p = hidden_by_wait(state, s)
@@ -175,6 +185,10 @@ def classify(sessions, state, now, cfg):
                 continue
             if nothing_needed(sc):
                 item["why"] = sc.get("ask") or "nothing needed"
+                out["free"].append(item)
+                continue
+            if seen_report(state, s, sc):
+                item["why"], item["seen"] = sc.get("ask") or "you have seen its report", True
                 out["free"].append(item)
                 continue
         item["eff"], item["base"], item["waited_h"] = effective(s, e, now, cfg)

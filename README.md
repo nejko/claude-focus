@@ -190,7 +190,10 @@ The sections, top to bottom:
   only waits for them: when they end, it continues by itself. The scorer
   reads such a turn too, and it moves to NEED YOU when it asks you for
   something.
-- FREE: nothing is needed; you can close or reuse the terminal.
+- FREE: nothing is needed; you can close or reuse the terminal. A session
+  that only reported (kind info) comes here by itself once you have been in
+  its pane after it answered (`seen`); `d` (done) sends any other here until
+  it changes.
 - AVAILABLE TERMINALS: free panes, ready for a new session (see "Free
   terminals").
 

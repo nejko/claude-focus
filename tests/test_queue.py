@@ -63,6 +63,21 @@ class ClassifyTest(unittest.TestCase):
         # done: working, and the shells wake it when they end.
         self.assertEqual(sorted(i["s"]["sessionId"] for i in v["working"]), ["done", "unscored", "waits"])
 
+    def test_a_report_leaves_need_you_once_the_user_has_seen_it(self):
+        # 2026-10-22: Nejc read a session's answer, and it stayed under NEED YOU.
+        # A report needs nothing more once seen; an action does: seeing is not doing.
+        read, unread, act, bg = (sess(n, status="shell" if n == "bg" else "idle")
+                                 for n in ("read", "unread", "act", "bg"))
+        kinds = {"read": "info", "unread": "info", "act": "action", "bg": "info"}
+        state = {"sessions": {x["key"]: {"score": score(x["statusSince"], 30, kind=kinds[x["key"]])}
+                              for x in (read, unread, act, bg)},
+                 "seen": {"read": read["statusSince"] + 60000, "unread": unread["statusSince"] - 60000,
+                          "act": act["statusSince"] + 60000, "bg": bg["statusSince"] + 60000}}
+        v = q.classify([read, unread, act, bg], state, NOW, DEFAULT_CONFIG)
+        self.assertEqual(sorted(i["s"]["sessionId"] for i in v["need"]), ["act", "unread"])
+        self.assertEqual([(i["s"]["sessionId"], i.get("seen")) for i in v["free"]], [("read", True)])
+        self.assertEqual([i["s"]["sessionId"] for i in v["working"]], ["bg"])  # its shells still run
+
     def test_a_score_of_the_turn_before_the_shells_does_not_count(self):
         a = sess("a", status="shell")
         v = self.classify([a], {"a": {"score": score(a["statusSince"] - 5000, 90)}})

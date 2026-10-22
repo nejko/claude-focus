@@ -1068,7 +1068,7 @@ class App:
             text = "" if path_col else short_path(s.get("cwd"))
         else:  # free
             done = item["e"].get("dismissed_stamp") == s["statusSince"]
-            lead, age, kind = f"{fg(acc)}○{R}", since, "done" if done else "nothing"
+            lead, age, kind = f"{fg(acc)}○{R}", since, "done" if done else "seen" if item.get("seen") else "nothing"
             text = sc.get("ask") or item.get("why", "")
         if sec != "working" and s["status"] == "shell":
             tags.append(f"{dim}◌ shells{R}")  # it asks the user while its background shells run
