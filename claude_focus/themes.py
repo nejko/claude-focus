@@ -15,6 +15,9 @@ draws it (the default palettes have none of them):
   keys    the line of the keys: {"cap": (fg, bg), "label": (fg, bg),
           "fmt": (cap format, label format), "sep": between two keys,
           "bg": the line's background}; a bg of None leaves the line's own
+  rule    the character of the rules and dividers (default ─)
+  status  a text at the right end of the key line (the keys give way)
+  upper   True: all text in capitals
 """
 DOUBLE, SINGLE, ROUND = "╔═╗║╚╝╟╢", "┌─┐│└┘├┤", "╭─╮│╰╯├┤"
 
@@ -172,6 +175,43 @@ C64 = {
 }
 
 
+# WordPerfect 5.1 (its default Setup colors): light grey on blue with bold in
+# white, a block light grey on red, the menu bar blue on grey, the keys as a
+# bottom-line menu ("1 Retrieve; 2 Delete"), and the status at the right.
+WORDPERFECT = {
+    "bg": (0, 0, 170),
+    "text": (255, 255, 255), "soft": (170, 170, 170), "dim": (170, 170, 170), "faint": (85, 85, 255),
+    "track": (0, 0, 110), "key": (0, 0, 170), "alert": (255, 85, 85),
+    "need": (255, 255, 255), "todo": (255, 255, 85), "pending": (85, 255, 255),
+    "working": (170, 170, 170), "free": (85, 85, 255), "terminals": (170, 170, 170),
+    "high": (255, 255, 255), "mid": (255, 255, 85), "low": (170, 170, 170),
+    "paint": True, "marker": " ",
+    "select": ((170, 170, 170), (170, 0, 0)),
+    "bar": ((0, 0, 170), (170, 170, 170)),
+    "keys": {"cap": ((255, 255, 255), None), "label": ((170, 170, 170), None),
+             "fmt": ("{}", " {}"), "sep": "; ", "bg": None},
+    "status": 'Doc 1 Pg 1 Ln 1" Pos 1"',
+}
+
+# Award BIOS setup (colors sampled from a screenshot): yellow items on blue
+# in a white double-line box under the CMOS Setup Utility title, a ► before
+# the selected item, the selection white on red, the key help as Esc : Quit.
+AWARD = {
+    "bg": (0, 0, 170),
+    "text": (255, 255, 85), "soft": (255, 255, 85), "dim": (170, 170, 170), "faint": (255, 255, 255),
+    "track": (0, 0, 110), "key": (0, 0, 170), "alert": (255, 85, 85),
+    "need": (255, 255, 255), "todo": (255, 255, 255), "pending": (85, 255, 255),
+    "working": (85, 255, 85), "free": (170, 170, 170), "terminals": (85, 255, 85),
+    "high": (255, 85, 85), "mid": (255, 255, 85), "low": (170, 170, 170),
+    "paint": True, "frame": (255, 255, 255), "box": DOUBLE, "marker": "►",
+    "title": ("CMOS Setup Utility - Copyright (C) 1984-1999 Award Software", (255, 255, 255), None),
+    "select": ((255, 255, 255), (170, 0, 0)),
+    "bar": ((255, 255, 255), (170, 0, 0)),
+    "keys": {"cap": ((255, 255, 255), None), "label": ((255, 255, 255), None),
+             "fmt": ("{} : ", "{}"), "sep": "   ", "bg": None},
+    "status": "F10 : Save & Exit Setup",
+}
+
 def monitor(bg, bright, normal, dim, faint):
     """A monochrome monitor: one phosphor color in four strengths, reverse
     video for the bars."""
@@ -184,6 +224,15 @@ def monitor(bg, bright, normal, dim, faint):
 
 GREEN = monitor((5, 12, 5), (51, 255, 51), (38, 190, 38), (26, 128, 26), (14, 60, 14))
 AMBER = monitor((12, 8, 0), (255, 176, 0), (200, 138, 0), (140, 96, 0), (64, 44, 0))
+
+# COBISS/OPAC as the libraries had it in the 1990s: a DEC VT420 or VT510
+# terminal on IZUM's VAX, monochrome amber (what people remember), reverse
+# video for the header and the bars, and the prompt Izbira:. No screenshot of
+# the text-mode OPAC was found, so this is a reconstruction.
+COBISS = dict(monitor((18, 12, 0), (255, 176, 0), (204, 136, 0), (140, 94, 0), (70, 47, 0)),
+              keys={"cap": ((255, 176, 0), None), "label": ((204, 136, 0), None),
+                    "fmt": ("{}", "={}"), "sep": "  ", "bg": None},
+              status="Izbira: █")
 
 
 def scheme(bg, text, soft, dim, faint, track, need, todo, pending, working, terminals, alert, mid, accent):
@@ -226,7 +275,8 @@ CATPPUCCIN_LATTE = scheme((239, 241, 245), (76, 79, 105), (92, 95, 119), (140, 1
 THEMES = {
     "norton": (NORTON, NORTON), "midnight-commander": (MIDNIGHT, MIDNIGHT), "qbasic": (QBASIC, QBASIC),
     "turbo-pascal": (TURBO_PASCAL, TURBO_PASCAL), "clipper": (CLIPPER, CLIPPER),
-    "total-commander": (TOTAL_COMMANDER, TOTAL_COMMANDER), "c64": (C64, C64),
+    "wordperfect": (WORDPERFECT, WORDPERFECT), "award-bios": (AWARD, AWARD),
+    "total-commander": (TOTAL_COMMANDER, TOTAL_COMMANDER), "cobiss": (COBISS, COBISS), "c64": (C64, C64),
     "green-screen": (GREEN, GREEN), "amber-screen": (AMBER, AMBER), "claude-code": (CLAUDE_DARK, CLAUDE_LIGHT),
     "dracula": (DRACULA, DRACULA), "solarized": (SOLARIZED_DARK, SOLARIZED_LIGHT), "nord": (NORD, NORD),
     "gruvbox": (GRUVBOX_DARK, GRUVBOX_LIGHT), "tokyo-night": (TOKYO_NIGHT, TOKYO_NIGHT),
@@ -236,7 +286,8 @@ THEMES = {
 ABOUT = {  # for the theme preview (key t)
     "default": "the default look", "norton": "Norton Commander", "midnight-commander": "Midnight Commander",
     "qbasic": "Microsoft QBasic 1.1", "turbo-pascal": "Borland Turbo Pascal 7", "clipper": "a Clipper application",
-    "total-commander": "Total Commander", "c64": "Commodore 64", "green-screen": "a green phosphor monitor",
+    "wordperfect": "WordPerfect 5.1", "award-bios": "Award BIOS setup", "total-commander": "Total Commander",
+    "cobiss": "COBISS/OPAC on an amber DEC terminal (a reconstruction)", "c64": "Commodore 64", "green-screen": "a green phosphor monitor",
     "amber-screen": "an amber monitor", "claude-code": "Claude Code", "dracula": "Dracula",
     "solarized": "Solarized, dark or light", "nord": "Nord", "gruvbox": "Gruvbox, dark or light",
     "tokyo-night": "Tokyo Night", "catppuccin": "Catppuccin, Mocha or Latte",

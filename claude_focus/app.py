@@ -1105,19 +1105,19 @@ class App:
         return look.on(line, mix(color, P["bg"], 0.16), w)
 
     def section_title(self, sec, title, n, w):
-        P, acc = self.pal, self.pal[sec]
+        P, acc, rule = self.pal, self.pal[sec], self.pal.get("rule", "─")
         count = f" {fg(acc)}{n}{R}" if n != "" else ""  # "": a title without a count (the start step)
         if P.get("frame"):  # a divider of the frame: ╟─ NEED YOU 3 ───╢ (see _framed)
-            head = f"{fg(P['frame'])}─ {fg(acc)}{B}{title}{R}{count} "
-            return head + fg(P["frame"]) + "─" * max(0, w - width(head)) + R
+            head = f"{fg(P['frame'])}{rule} {fg(acc)}{B}{title}{R}{count} "
+            return head + fg(P["frame"]) + rule * max(0, w - width(head)) + R
         head = f" {bg(mix(acc, P['bg'], 0.24))}{fg(acc)}{B} {title} {R}{count} "
-        return head + fg(P["faint"]) + "─" * max(0, w - width(head)) + R
+        return head + fg(P["faint"]) + rule * max(0, w - width(head)) + R
 
     def _framed(self, line, inner):
         """A line of the list inside the theme's frame. A section title (it
-        starts with ─) joins the frame as a divider."""
+        starts with the theme's rule, ─) joins the frame as a divider."""
         box, fc = self.pal.get("box") or themes.DOUBLE, fg(self.pal["frame"])
-        side = box[6:8] if look.ANSI.sub("", line).startswith("─") else box[3] * 2
+        side = box[6:8] if look.ANSI.sub("", line).startswith(self.pal.get("rule", "─")) else box[3] * 2
         return f"{fc}{side[0]}{R}" + look.pad(fit(line, inner), inner) + f"{fc}{side[1]}{R}"
 
     def _border(self, inner, top):
@@ -1234,11 +1234,15 @@ class App:
 
         # The keys are the last line of the screen, the flash just above the rule.
         bottom_lines = [f"  {fg(P['working'])}{self.msg}{R}" if self.msg and time.time() < self.msg_until else "",
-                        self._border(inner, top=False) if frame else fg(P["faint"]) + "─" * w + R]
+                        self._border(inner, top=False) if frame else fg(P["faint"]) + P.get("rule", "─") * w + R]
         if self.mode == "restore" and self.restore_lines:
             bottom_lines += [f"  {fg(P['pending'])}{B}{self.restore_lines[0]}{R}"]
             bottom_lines += [f"  {fg(P['text'])}{line}{R}" for line in self.restore_lines[1:]] + [""]
-        bottom_lines.append(self._keys_line(now))
+        keys = self._keys_line(now)
+        status = P.get("status")  # a theme's own text at the right of the key line; the keys give way
+        if status and w >= len(status) + 40:
+            keys = look.pad(fit(keys, w - len(status) - 3), w - len(status) - 1) + f"{fg(P['soft'])}{status}{R}"
+        bottom_lines.append(keys)
 
         room = max(3, rows_n - len(top_lines) - len(bottom_lines))
         # The rows keep their places: the selection changes only the highlight.
@@ -1340,10 +1344,12 @@ class App:
             hk = self.cfg["hotkey_go"].replace("ctrl", "⌃").replace("option", "⌥").replace("+", "").upper()
             keys.insert(3, (hk, "go to top"))
         wide = "  " + self._sep().join(self._key(c, label) for c, label in keys)
-        if width(wide) <= shutil.get_terminal_size((100, 40)).columns - 1:
+        status = P.get("status")  # it goes at the right end (render): the keys leave room for it
+        if width(wide) <= shutil.get_terminal_size((100, 40)).columns - 1 - (len(status) + 3 if status else 0):
             return wide
         if P.get("keys"):  # the key bar keeps its fields, with one-word labels
-            return " " + (self._sep().strip() or " ").join(self._key(c, label.split()[-1]) for c, label in keys)
+            sep = self._sep() if self._sep().strip() else " "
+            return " " + sep.join(self._key(c, label.split()[-1]) for c, label in keys)
         return "  " + "  ".join(f"{fg(P['text'])}{B}{c}{R} {fg(P['dim'])}{label.split()[-1]}{R}" for c, label in keys)
 
     # ---- loops ------------------------------------------------------------
