@@ -3,6 +3,10 @@ and compute the effective priority. No I/O here, so tests can drive it."""
 import datetime as dt
 
 UNSCORED_PRIORITY = 50
+# A score comes about 17 s after a turn ends (27 s at the 90th percentile,
+# state.json on 2026-10-22); until then, or this long, the session waits
+# under WORKING as "scoring".
+SCORING_GRACE_S = 120
 # Claude Code's statuses: busy (a turn runs), shell (the turn ended but
 # background shells still run and will wake the session), idle (done,
 # waits for the next prompt), waiting (a question or permission prompt).
@@ -202,6 +206,14 @@ def classify(sessions, state, now, cfg):
                 item["why"], item["seen"] = sc.get("ask") or "you have seen its report", True
                 out["free"].append(item)
                 continue
+        # Not scored yet: under WORKING as "scoring" for a while, so it does not
+        # jump into NEED YOU with an older state's priority and then leave. An
+        # open question needs no score, and a scorer that fails or lags lets
+        # it into NEED YOU after SCORING_GRACE_S.
+        if not sc and s["status"] != "waiting" and now_ms - stamp < SCORING_GRACE_S * 1000:
+            item["scoring"] = True
+            out["working"].append(item)
+            continue
         item["eff"], item["base"], item["waited_h"] = effective(s, e, now, cfg)
         out["need"].append(item)
     out["need"].sort(key=lambda i: (-i["eff"], -i["waited_h"]))

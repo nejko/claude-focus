@@ -1062,9 +1062,9 @@ class App:
             kind = "snoozed" if snoozed else "check" if p and p.get("check") else "wait" if p else "later"
             text = item.get("why", "")
         elif sec == "working":
-            shells = s["status"] == "shell"
-            lead, age = f"{fg(acc)}{'◌' if shells else '●'}{R}", since
-            kind = "shells" if shells else "busy"
+            glyph, kind = (("◐", "scoring") if item.get("scoring")  # its turn ended; the score comes
+                           else ("◌", "shells") if s["status"] == "shell" else ("●", "busy"))
+            lead, age = f"{fg(acc)}{glyph}{R}", since
             text = "" if path_col else short_path(s.get("cwd"))
         else:  # free
             done = item["e"].get("dismissed_stamp") == s["statusSince"]

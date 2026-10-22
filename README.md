@@ -189,7 +189,9 @@ The sections, top to bottom:
 - WORKING: the session is busy, or its background shells still run and it
   only waits for them: when they end, it continues by itself. The scorer
   reads such a turn too, and it moves to NEED YOU when it asks you for
-  something.
+  something. A session that has just answered waits here too, as
+  `scoring`, until its score comes (about 20 seconds); if the score takes
+  longer than 2 minutes, it goes to NEED YOU unscored.
 - FREE: nothing is needed; you can close or reuse the terminal. A session
   that only reported (kind info) comes here by itself once you have been in
   its pane after it answered (`seen`); `d` (done) sends any other here until
@@ -202,7 +204,7 @@ lead (in NEED YOU the priority as a number and a bar whose length is the
 priority; in PENDING the wake time), an age (how long it has waited for you,
 worked or slept; in PENDING the time until it wakes), the name, the folder
 the session runs in, a kind (decision, action, check, wait, snoozed, busy,
-shells, ...) and the text. The folder column is as wide as the longest
+shells, scoring, ...) and the text. The folder column is as wide as the longest
 folder on the screen, at most 40 columns; a longer folder keeps its end.
 Windows narrower than 110 columns drop the folder column (WORKING then shows
 the folder as its text), and below 100 columns also the kind column.

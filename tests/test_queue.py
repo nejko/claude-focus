@@ -83,6 +83,21 @@ class ClassifyTest(unittest.TestCase):
         v = self.classify([a], {"a": {"score": score(a["statusSince"] - 5000, 90)}})
         self.assertEqual([i["s"]["sessionId"] for i in v["working"]], ["a"])
 
+    def test_an_unscored_session_waits_under_working_while_it_is_scored(self):
+        # stane-scraping, 2026-10-22 12:23: it had just answered, and stood at the top
+        # of NEED YOU as "scoring..." with the 70 of its state before.
+        status = {"asks": "waiting"}
+        new, slow, asks, scored, old = (sess(n, status=status.get(n, "idle"), waited_h=h) for n, h in
+                                        (("new", 0.01), ("slow", 0.05), ("asks", 0.01), ("scored", 0.01), ("old", 0.01)))
+        v = self.classify([new, slow, asks, scored, old], {
+            "scored": {"score": score(scored["statusSince"], 40)},
+            "old": {"score": score(old["statusSince"] - 600000, 70)},  # a score of its state before
+        })
+        self.assertEqual([(i["s"]["sessionId"], i.get("scoring")) for i in v["working"]],
+                         [("new", True), ("old", True)])
+        # A score that lags 2 minutes, an open question and a fresh score: NEED YOU.
+        self.assertEqual(sorted(i["s"]["sessionId"] for i in v["need"]), ["asks", "scored", "slow"])
+
     def test_aging_lifts_a_neglected_session(self):
         old, new = sess("old", waited_h=200), sess("new", waited_h=0.1)
         v = self.classify([old, new], {
