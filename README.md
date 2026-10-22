@@ -584,7 +584,7 @@ remote machine show without a pane.
 | `ask_model` | `"claude-haiku-5-5"` | With jev: the model that writes the one-line request (`""` = off) |
 | `scorer_parallel` | `4` | Sessions scored at the same time |
 | `poll_seconds` | `3` | How often the state is read |
-| `aging_points_per_hour`, `aging_max` | `0.15`, `10` | The bonus for waiting |
+| `aging_points_per_hour`, `aging_max` | `0.15`, `10` | The bonus for waiting, added to the score; the sum stays at most 100, and at 100 the longer wait goes first |
 | `terminal` | `"auto"` | `"auto"`, `"iterm"` or `"herdr"` (see "Which terminal") |
 | `theme` | `"default"` | The focus screen's look: `"default"`, `"norton"`, `"qbasic"`, `"turbo-pascal"`, `"clipper"`, `"total-commander"` or `"claude-code"` (keys `t` and `T` switch) |
 | `zoom` | `true` | Maximize (in herdr: zoom) the pane on Enter |

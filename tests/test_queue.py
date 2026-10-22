@@ -59,6 +59,14 @@ class ClassifyTest(unittest.TestCase):
         })
         self.assertEqual(v["need"][0]["s"]["sessionId"], "crit")
 
+    def test_never_over_100(self):
+        # ultima-7b, 2026-10-22: a score of 100 after 11 h of waiting showed as 102.
+        top, older = sess("top", waited_h=11), sess("older", waited_h=40)
+        v = self.classify([top, older], {"top": {"score": score(top["statusSince"], 100)},
+                                         "older": {"score": score(older["statusSince"], 96)}})
+        self.assertEqual([i["eff"] for i in v["need"]], [100, 100])
+        self.assertEqual(v["need"][0]["s"]["sessionId"], "older")  # at 100, the longer wait first
+
     def test_tie_goes_to_longest_wait(self):
         a, b = sess("a", waited_h=1), sess("b", waited_h=1.0001)
         v = self.classify([a, b], {"a": {"manual_priority": 50}, "b": {"manual_priority": 50}})

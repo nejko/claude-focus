@@ -44,12 +44,14 @@ def effective(sess, e, now, cfg):
     The scorer already weighs deadlines (it is rerun every 12 h with the
     current date), so the only bonus here is a small one for waiting: it
     stops a neglected session from sinking forever, but it cannot lift a
-    medium item over a critical one."""
+    medium item over a critical one. The effective priority stays at most
+    100, like the score: among sessions at 100, the longest wait goes first
+    (classify sorts by the wait next)."""
     score = e.get("score") or {}
     base = e.get("manual_priority") or score.get("priority") or UNSCORED_PRIORITY
     waited_h = max(0.0, (now.timestamp() * 1000 - sess["statusSince"]) / 3.6e6)
     aging = min(cfg["aging_max"], waited_h * cfg["aging_points_per_hour"])
-    return base + aging, base, waited_h
+    return min(100, base + aging), base, waited_h
 
 
 def next_event_ms(p, now_ms):
