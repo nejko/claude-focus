@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-focus"
-version = "0.1.0"
+dynamic = ["version"]
 description = "One priority queue over all your running Claude Code sessions in herdr or iTerm2"
 readme = "README.md"
 license = {text = "MIT"}
@@ -19,6 +19,10 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 
+[project.urls]
+Homepage = "https://github.com/nejko/claude-focus"
+Issues = "https://github.com/nejko/claude-focus/issues"
+
 [project.optional-dependencies]
 jev = ["typesafe-sdk==0.7.0"]  # the jev scorer (config "scorer": "jev"; needs a TypeSafe key)
 
@@ -27,6 +31,9 @@ claude-focus = "claude_focus.cli:main"
 
 [tool.setuptools]
 packages = ["claude_focus"]
+
+[tool.setuptools.dynamic]
+version = {attr = "claude_focus.__version__"}
 
 [tool.setuptools.package-data]
 claude_focus = ["priorities.template.md", "claude_md_rule.md"]

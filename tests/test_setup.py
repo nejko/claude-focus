@@ -65,6 +65,22 @@ class RuleTest(unittest.TestCase):
         self.assertEqual(su.remove_rule(text)[0], "top\n\n## Later rules\n")
 
 
+class LastingPathTest(unittest.TestCase):
+    def test_a_cellar_path_becomes_the_opt_link(self):
+        with tempfile.TemporaryDirectory() as brew:
+            os.makedirs(f"{brew}/Cellar/claude-focus/0.1.0/libexec/bin")
+            os.makedirs(f"{brew}/opt")
+            os.symlink(f"{brew}/Cellar/claude-focus/0.1.0", f"{brew}/opt/claude-focus")
+            self.assertEqual(cli.lasting(f"{brew}/Cellar/claude-focus/0.1.0/libexec/bin/python"),
+                             f"{brew}/opt/claude-focus/libexec/bin/python")
+
+    def test_other_paths_stay(self):
+        for path in ("/Users/me/.local/share/uv/tools/claude-focus/bin/python",
+                     "/nowhere/Cellar/claude-focus/0.1.0/libexec/bin/python",  # no opt link there
+                     "/opt/homebrew/Cellar/claude-focus"):
+            self.assertEqual(cli.lasting(path), path)
+
+
 class ProfileTest(unittest.TestCase):
     def test_green_profile_with_both_themes(self):
         p = su.profile_plist("Available")["Profiles"][0]

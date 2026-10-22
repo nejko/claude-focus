@@ -326,6 +326,19 @@ def _launchctl(*args):
     return subprocess.run(["launchctl", *args], capture_output=True, text=True)
 
 
+def lasting(path):
+    """A path in Homebrew's Cellar (<prefix>/Cellar/claude-focus/0.1.0/...)
+    as the same path under brew's opt link (<prefix>/opt/claude-focus/...),
+    which brew keeps across upgrades; the Cellar folder goes away. Any other
+    path as it is."""
+    head, sep, tail = path.partition("/Cellar/")
+    name, _, rest = tail.partition("/")
+    rest = rest.partition("/")[2]
+    if sep and rest and os.path.isdir(f"{head}/opt/{name}"):
+        return f"{head}/opt/{name}/{rest}"
+    return path
+
+
 def cmd_install_daemon():
     import plistlib
 
@@ -333,10 +346,10 @@ def cmd_install_daemon():
     # The Python that runs this command (a venv's, or the one pip installed
     # into), with the folder that holds the package on PYTHONPATH, so the
     # service also runs from a checkout that is not installed.
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root = lasting(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     plist = {
         "Label": LABEL,
-        "ProgramArguments": [sys.executable, "-m", "claude_focus", "daemon"],
+        "ProgramArguments": [lasting(sys.executable), "-m", "claude_focus", "daemon"],
         "RunAtLoad": True,
         "KeepAlive": True,
         "ThrottleInterval": 30,
@@ -396,6 +409,9 @@ def main():
     if not args:
         from .app import main as tui
         tui()
+    elif args[0] in ("--version", "-V"):
+        from . import __version__
+        print(f"claude-focus {__version__}")
     elif args[0] == "list":
         cmd_list()
     elif args[0] == "go":
@@ -430,5 +446,5 @@ def main():
     else:
         print("usage: claude-focus [setup [--yes] [--dry-run] | uninstall [--purge] | list | go | show | "
               "pending --help | restore [--dry-run] | reboot [--dry-run] | cost | status | install-daemon | "
-              "uninstall-daemon]")
+              "uninstall-daemon | --version]")
         sys.exit(2)

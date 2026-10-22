@@ -1,0 +1,27 @@
+# Publishes a release to PyPI when a version tag (v0.1.0) is pushed. PyPI
+# trusts this workflow as a trusted publisher (repository nejko/claude-focus,
+# workflow release.yml, environment pypi), so no token is stored anywhere.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa  # v10.3.1
+        with:
+          version: ">=0.13.4"  # no longer trusts the emSign root CA (the eMudhra incident, October 2026)
+      - name: The tag matches the version in claude_focus/__init__.py
+        run: test "${GITHUB_REF_NAME#v}" = "$(sed -n 's/^__version__ = "\(.*\)"/\1/p' claude_focus/__init__.py)"
+      - run: uv build
+      - run: uv publish
