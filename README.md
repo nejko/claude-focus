@@ -205,39 +205,43 @@ in herdr.
 
 ### Themes
 
-`t` switches to the next theme and `T` to the one before; the theme stays
-in the config (`"theme"`). There are seven:
+`t` shows the next theme on the screen at once, and `T` the one before
+(the arrow keys step too). The key line says which theme it is. Enter
+keeps it in the config (`"theme"`), and Esc goes back to the theme you had.
 
-- `default`: the look described above, on the terminal's own background.
-- `norton`: Norton Commander. Light cyan on blue in a double-line frame, a
-  black-on-cyan selection bar, and a key bar with the keys white on black
-  and their labels black on cyan.
-- `qbasic`: Microsoft QBasic. Light grey on blue in a single-line window
-  titled `Untitled`, the title line black on grey, and the keys as
-  `<n=session>` on a cyan status line.
-- `turbo-pascal`: Borland Turbo Pascal 7. Yellow on blue in a white
-  double-line window titled `FOCUS.PAS`, the selection black on green, and
-  a grey status line with red key names.
-- `clipper`: a Clipper business application (`SET COLOR TO W+/B,N/W`).
-  White on blue in a double-line box, with the highlight bar and the status
-  line black on grey.
-- `total-commander`: Total Commander on classic Windows. Black on white,
-  the title line and the cursor bar white on navy, and grey key buttons.
-- `claude-code`: Claude Code's own colors on the terminal's background, in
-  its dark or light version. Claude orange for what needs you, a rounded
-  box titled `✻ claude-focus`, and the selected row in its suggestion blue
-  with a `❯`.
+| Theme | What it imitates |
+|---|---|
+| `default` | The look described above, on the terminal's own background |
+| `norton` | Norton Commander: light cyan on blue in a double-line frame, a black-on-cyan bar, the `1Help` key bar |
+| `midnight-commander` | Midnight Commander: light grey on blue in single-line frames, the panel title and bar black on cyan |
+| `qbasic` | Microsoft QBasic: light grey on blue in a window titled `Untitled`, keys as `<n=session>` on a cyan status line |
+| `turbo-pascal` | Borland Turbo Pascal 7: yellow on blue in a white double-line window `FOCUS.PAS`, the bar black on green, red key names |
+| `clipper` | A Clipper application (`SET COLOR TO W+/B,N/W`): white on blue, a double-line box, the bar and status line black on grey |
+| `wordperfect` | WordPerfect 5.1: light grey on blue, a block light grey on red, `Doc 1 Pg 1 Ln 1" Pos 1"` at the bottom right |
+| `award-bios` | Award BIOS setup: yellow on blue in a white box titled CMOS Setup Utility, a `►` and a white-on-red bar |
+| `total-commander` | Total Commander on classic Windows: black on white, the title and cursor bar white on navy, grey key buttons |
+| `cobiss` | COBISS/OPAC on the amber DEC VT420/VT510 terminals of Slovenian libraries, with the prompt `Izbira:` (a reconstruction) |
+| `c64` | Commodore 64: light blue capitals on blue in a thick border, `**** COMMODORE 64 BASIC V2 ****` |
+| `ladder` | The game Ladder on a Kaypro II: one P31 green, floors `=`, walls `\|`, ladders `H`, Lad `p` at the selected row |
+| `green-screen`, `amber-screen` | A monochrome monitor: one phosphor color in four strengths, reverse video bars |
+| `claude-code` | Claude Code's own colors (dark or light): claude orange, a rounded box titled `✻ claude-focus`, the selected row in its suggestion blue with `❯` |
+| `dracula`, `nord`, `tokyo-night` | The color schemes, each on its own background |
+| `solarized`, `gruvbox`, `catppuccin` | The color schemes, dark or light with the terminal (Catppuccin: Mocha or Latte) |
 
 The retro themes paint their own background, so they look the same in a
 dark and a light terminal. Their colors come from the programs where a
 source exists: the MS-DOS 6.0 source for QBasic, `TURBO.EXE` 7.01 for Turbo
-Pascal, and Claude Code 2.1.306 for Claude Code.
+Pascal, WordPerfect's default Setup colors, a screenshot for Award BIOS,
+the Pepto palette for the C64, `LADDER.COM` 1.30 for Ladder, and Claude
+Code 2.1.306 for Claude Code. For COBISS, IZUM's newsletters confirm the
+DEC VT terminals, but no picture of the text-mode OPAC was found.
 
 ![The themes](docs/themes.png)
 
 A theme is a palette in [claude_focus/themes.py](claude_focus/themes.py).
 Its docstring lists the keys that change how the screen is drawn: `paint`,
-`frame`, `box`, `title`, `select`, `marker`, `bar` and `keys`.
+`frame`, `box`, `title`, `select`, `marker`, `bar`, `keys`, `rule`,
+`status` and `upper`.
 
 The selection starts on the first row of NEED YOU (else of YOUR TO-DOS).
 After Enter, it goes back there. The rows never move when the selection
@@ -258,7 +262,7 @@ screen has the keys, its title bar is green (in a theme, the theme's color).
 | d | Done: nothing is needed now; the session comes back when it changes. On a to-do: your part is done |
 | r | Score the selected session again |
 | R | iTerm2: restore the windows of the last iTerm2 run (shown only when some are closed) |
-| t, T | Switch to the next theme, or to the one before (see "Themes") |
+| t, T | Show the next theme, or the one before; Enter keeps it, Esc goes back (see "Themes") |
 | q | Quit |
 
 From anywhere: in iTerm2, two optional global hotkeys (`"hotkeys": true` in
@@ -586,7 +590,7 @@ remote machine show without a pane.
 | `poll_seconds` | `3` | How often the state is read |
 | `aging_points_per_hour`, `aging_max` | `0.15`, `10` | The bonus for waiting, added to the score; the sum stays at most 100, and at 100 the longer wait goes first |
 | `terminal` | `"auto"` | `"auto"`, `"iterm"` or `"herdr"` (see "Which terminal") |
-| `theme` | `"default"` | The focus screen's look: `"default"`, `"norton"`, `"qbasic"`, `"turbo-pascal"`, `"clipper"`, `"total-commander"` or `"claude-code"` (keys `t` and `T` switch) |
+| `theme` | `"default"` | The focus screen's look, one of the themes in "Themes" (keys `t` and `T`) |
 | `zoom` | `true` | Maximize (in herdr: zoom) the pane on Enter |
 | `return_after_answer` | `true` | Come back after you answer a question |
 | `new_session_command` | `"claude"` | What a new session in a free terminal runs, after `cd <folder> &&` |

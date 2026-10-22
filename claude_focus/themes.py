@@ -212,6 +212,23 @@ AWARD = {
     "status": "F10 : Save & Exit Setup",
 }
 
+# Ladder (Yahoo Software, 1982) on a Kaypro II: a P31 green screen with no
+# attributes at all, so one green for everything. The game's own characters:
+# floors =, walls |, ladders H joining the dividers to the walls, Lad (p) at
+# the selected row, and its status line Lads 5 Level 1 Score 000.
+G = (0, 220, 0)
+LADDER = {
+    "bg": (5, 10, 5),
+    "text": G, "soft": G, "dim": G, "faint": G, "track": (0, 50, 0), "key": (0, 50, 0), "alert": G,
+    "need": G, "todo": G, "pending": G, "working": G, "free": G, "terminals": G, "high": G, "mid": G, "low": G,
+    "paint": True, "frame": G, "box": "===|==HH", "rule": "=", "marker": "p",
+    "title": ("Ladder 1.30  (c) 1982, 1983 Yahoo Software", G, None),
+    "select": ((124, 255, 106), None),
+    "bar": ((5, 10, 5), G),
+    "keys": {"cap": (G, None), "label": (G, None), "fmt": ("{} = ", "{}"), "sep": "   ", "bg": None},
+    "status": "Lads    5     Level    1     Score     000",
+}
+
 def monitor(bg, bright, normal, dim, faint):
     """A monochrome monitor: one phosphor color in four strengths, reverse
     video for the bars."""
@@ -277,6 +294,7 @@ THEMES = {
     "turbo-pascal": (TURBO_PASCAL, TURBO_PASCAL), "clipper": (CLIPPER, CLIPPER),
     "wordperfect": (WORDPERFECT, WORDPERFECT), "award-bios": (AWARD, AWARD),
     "total-commander": (TOTAL_COMMANDER, TOTAL_COMMANDER), "cobiss": (COBISS, COBISS), "c64": (C64, C64),
+    "ladder": (LADDER, LADDER),
     "green-screen": (GREEN, GREEN), "amber-screen": (AMBER, AMBER), "claude-code": (CLAUDE_DARK, CLAUDE_LIGHT),
     "dracula": (DRACULA, DRACULA), "solarized": (SOLARIZED_DARK, SOLARIZED_LIGHT), "nord": (NORD, NORD),
     "gruvbox": (GRUVBOX_DARK, GRUVBOX_LIGHT), "tokyo-night": (TOKYO_NIGHT, TOKYO_NIGHT),
@@ -287,7 +305,8 @@ ABOUT = {  # for the theme preview (key t)
     "default": "the default look", "norton": "Norton Commander", "midnight-commander": "Midnight Commander",
     "qbasic": "Microsoft QBasic 1.1", "turbo-pascal": "Borland Turbo Pascal 7", "clipper": "a Clipper application",
     "wordperfect": "WordPerfect 5.1", "award-bios": "Award BIOS setup", "total-commander": "Total Commander",
-    "cobiss": "COBISS/OPAC on an amber DEC terminal (a reconstruction)", "c64": "Commodore 64", "green-screen": "a green phosphor monitor",
+    "cobiss": "COBISS/OPAC on an amber DEC terminal (a reconstruction)", "c64": "Commodore 64",
+    "ladder": "Ladder on a Kaypro II (Yahoo Software, 1982)", "green-screen": "a green phosphor monitor",
     "amber-screen": "an amber monitor", "claude-code": "Claude Code", "dracula": "Dracula",
     "solarized": "Solarized, dark or light", "nord": "Nord", "gruvbox": "Gruvbox, dark or light",
     "tokyo-night": "Tokyo Night", "catppuccin": "Catppuccin, Mocha or Latte",
