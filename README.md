@@ -11,7 +11,7 @@ the ones that work, the ones that are done, and your free terminals. Enter
 takes you to the selected session's pane. When you answer, the session works
 on, and the next one is selected.
 
-![The focus screen](docs/screenshot.png)
+![The focus screen](https://raw.githubusercontent.com/nejko/claude-focus/main/docs/screenshot.png)
 
 It also lets a session wait for something external (a reply, a deploy, a
 date) without sitting in your queue. When the time comes or a check command
@@ -96,12 +96,14 @@ Enable Python API), then run these two commands in iTerm2. In herdr, run
 them in one of its panes:
 
 ```sh
-uv tool install git+https://github.com/nejko/claude-focus
+brew install nejko/tap/claude-focus
 claude-focus setup
 ```
 
-No uv yet? `brew install uv`, or see [docs.astral.sh/uv](https://docs.astral.sh/uv/).
-pipx works too: `pipx install git+https://github.com/nejko/claude-focus`.
+Homebrew brings its own Python. Without Homebrew, install it with uv:
+`uv tool install claude-focus` (see [docs.astral.sh/uv](https://docs.astral.sh/uv/)),
+or with pipx: `pipx install claude-focus`. The newest code from GitHub,
+before it is released: `uv tool install git+https://github.com/nejko/claude-focus`.
 
 `claude-focus setup` does the rest and tells you what it did. You can run it
 again at any time; it skips what is done. It:
@@ -114,7 +116,7 @@ again at any time; it skips what is done. It:
 3. adds the prompt hook to `~/.claude/settings.json` (see "Pending waits").
 4. adds a short rule to `~/.claude/CLAUDE.md`, so that sessions know how to
    wait (the text is in
-   [claude_focus/claude_md_rule.md](claude_focus/claude_md_rule.md)).
+   [claude_focus/claude_md_rule.md](https://github.com/nejko/claude-focus/blob/main/claude_focus/claude_md_rule.md)).
 5. sets up the terminal:
    - iTerm2: asks whether you want free terminals, adds a green iTerm2
      profile and lets claude-focus switch panes to it (see "iTerm2").
@@ -137,6 +139,7 @@ to say what matters to you.
 
 ### Upgrade
 
+`brew upgrade claude-focus && claude-focus setup`, or with uv
 `uv tool upgrade claude-focus && claude-focus setup` (setup restarts the
 service on the new code).
 
@@ -145,7 +148,7 @@ service on the new code).
 `claude-focus uninstall` removes the service, the hook, the CLAUDE.md rule,
 the green iTerm2 profile and the herdr keys, and keeps your state in
 `~/.claude-focus` (`--purge` removes it too). Then
-`uv tool uninstall claude-focus`.
+`brew uninstall claude-focus`, or `uv tool uninstall claude-focus`.
 
 ### Development
 
@@ -236,9 +239,9 @@ the Pepto palette for the C64, `LADDER.COM` 1.30 for Ladder, and Claude
 Code 2.1.306 for Claude Code. For COBISS, IZUM's newsletters confirm the
 DEC VT terminals, but no picture of the text-mode OPAC was found.
 
-![The themes](docs/themes.png)
+![The themes](https://raw.githubusercontent.com/nejko/claude-focus/main/docs/themes.png)
 
-A theme is a palette in [claude_focus/themes.py](claude_focus/themes.py).
+A theme is a palette in [claude_focus/themes.py](https://github.com/nejko/claude-focus/blob/main/claude_focus/themes.py).
 Its docstring lists the keys that change how the screen is drawn: `paint`,
 `frame`, `box`, `title`, `select`, `marker`, `bar`, `keys`, `rule`,
 `status` and `upper`.
@@ -303,8 +306,8 @@ There are two scorers (config `scorer`):
   (no CLAUDE.md, memory, MCP servers or thinking; a 5-minute cache).
 - `jev`: [TypeSafe](https://typesafe.ai)'s jev model answers typed
   questions with probabilities. About $0.0001 per call. It needs a key and
-  the jev extra:
-  `uv tool install --force 'claude-focus[jev] @ git+https://github.com/nejko/claude-focus'`.
+  the jev extra, which needs the uv install:
+  `uv tool install --force 'claude-focus[jev]'`.
 
   **jev works with OpenRouter.** Give it either key, in the environment or
   in `~/.config/claude-focus/credentials` (one `NAME=value` per line, mode
@@ -667,6 +670,17 @@ both write to one transcript.
 The tests use a scratch folder, never your `~/.claude-focus`. The herdr
 tests run against a fake herdr server on a scratch socket.
 
+## Releasing
+
+1. Set the new version in `claude_focus/__init__.py` (`__version__`),
+   commit, and push main.
+2. Push its tag: `git tag v0.1.1 && git push origin v0.1.1`. The Release
+   workflow (`.github/workflows/release.yml`) checks that the tag matches
+   the version and publishes the release to PyPI.
+3. In [nejko/homebrew-tap](https://github.com/nejko/homebrew-tap), point
+   `url` and `sha256` in `Formula/claude-focus.rb` at the new sdist on
+   PyPI, and push.
+
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/nejko/claude-focus/blob/main/LICENSE).
