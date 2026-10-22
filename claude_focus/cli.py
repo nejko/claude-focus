@@ -283,14 +283,16 @@ def cmd_reboot(argv):
 def cmd_hook(argv):
     """Claude Code hooks (~/.claude/settings.json). `hook prompt-submit` is
     the UserPromptSubmit hook: it ends the wait of a session that the user types
-    into and tells Claude so. It never blocks a prompt."""
+    into and tells Claude so, and tells a session that started before the last
+    change of ~/.claude/CLAUDE.md to read it again. It never blocks a prompt."""
     import json
 
-    from . import pending as pend
+    from . import claudemd, pending as pend
 
     try:
         if argv[:1] == ["prompt-submit"]:
-            context = pend.on_prompt(json.load(sys.stdin))
+            hook = json.load(sys.stdin)
+            context = "\n\n".join(x for x in (pend.on_prompt(hook), claudemd.notice(hook)) if x)
             if context:
                 print(json.dumps({"hookSpecificOutput": {
                     "hookEventName": "UserPromptSubmit", "additionalContext": context}}))

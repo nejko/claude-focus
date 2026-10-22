@@ -44,6 +44,7 @@ DEFAULT_CONFIG = {
     "project_roots": ["~/Projects", "~/projects", "~/code", "~/src", "~/dev", "~/Developer",
                       "~/repos", "~/git", "~/work"],  # their subfolders are offered too (folders.candidates)
     "wake_check_output": False,         # put a check's output into the wake-up message (see pending.wake_message)
+    "claude_md_notice": True,           # tell a running session, with its next prompt, that ~/.claude/CLAUDE.md changed
 }
 
 

@@ -113,7 +113,7 @@ again at any time; it skips what is done. It:
    control iTerm2: allow it.
 2. asks your name, for the messages to sessions
    (`~/.claude-focus/config.json`).
-3. adds the prompt hook to `~/.claude/settings.json` (see "Pending waits").
+3. adds the prompt hook to `~/.claude/settings.json` (see "Pending waits" and "CLAUDE.md changes").
 4. adds a short rule to `~/.claude/CLAUDE.md`, so that sessions know how to
    wait (the text is in
    [claude_focus/claude_md_rule.md](https://github.com/nejko/claude-focus/blob/main/claude_focus/claude_md_rule.md)).
@@ -408,6 +408,15 @@ Safety rules of the waker:
 - A check's output is not put into the wake-up message (it can carry text
   from outside, such as an e-mail). `"wake_check_output": true` turns it on.
 
+## CLAUDE.md changes
+
+Claude Code reads `~/.claude/CLAUDE.md` once, when a session starts. When you
+change it, the prompt hook tells each session that started earlier, once and
+with its next prompt (yours or a wake-up), to read the file again. It does
+not message all sessions at once: each would answer "I read it again", and
+that answer would take the place of the request it left for you in NEED YOU.
+`"claude_md_notice": false` turns it off.
+
 ## Free terminals
 
 A pane whose Claude session has ended is free for the next one, and shows
@@ -612,6 +621,7 @@ remote machine show without a pane.
 | `new_session_command` | `"claude"` | What a new session in a free terminal runs, after `cd <folder> &&` |
 | `project_roots` | `~/Projects`, `~/code`, `~/src`, ... | Folders whose subfolders the folder list offers too |
 | `wake_check_output` | `false` | Put a check's output into the wake-up message |
+| `claude_md_notice` | `true` | Tell a running session, with its next prompt, that `~/.claude/CLAUDE.md` changed |
 | `hotkeys`, `hotkey_go`, `hotkey_focus_window` | `false`, ⌃⌥N, ⌃⌥F | iTerm2's global hotkeys (only a focus screen registers them) |
 | `free_profile`, `session_profile` | `"Available"`, `"Default"` | iTerm2: the profiles of free terminals and of sessions |
 | `auto_profiles` | `false` | iTerm2: switch those profiles by itself (setup turns it on if you want free terminals) |
