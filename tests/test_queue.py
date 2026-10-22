@@ -175,6 +175,26 @@ class PendingTest(unittest.TestCase):
         v = q.classify([a], st, NOW, DEFAULT_CONFIG)
         self.assertEqual(len(v["need"]), 1)
 
+    def test_a_session_whose_shells_run_shows_its_wait(self):
+        # klemen-ama, 2026-10-22 12:16: it set a wait, and its turn ended with one
+        # background shell still running; it sat under WORKING as "shells".
+        a = dict(sess("a", status="shell"), pid=7)
+        st = {"sessions": {}, "pending": {"a": {"pid": 7, "until": NOW.timestamp() * 1000 + H,
+                                                "note": "Klemen's slides"}}}
+        self.assertEqual([i["why"] for i in q.classify([a], st, NOW, DEFAULT_CONFIG)["pending"]],
+                         ["Klemen's slides"])
+        st["pending"]["a"]["needs"] = "send the draft"
+        self.assertEqual(len(q.classify([a], st, NOW, DEFAULT_CONFIG)["todo"]), 1)
+        a["status"] = "busy"  # a turn runs again: it works
+        self.assertEqual(len(q.classify([a], st, NOW, DEFAULT_CONFIG)["working"]), 1)
+
+    def test_an_undelivered_wakeup_of_a_shell_session_needs_the_user(self):
+        a = sess("a", status="shell")
+        e = {"woke": {"delivered": False, "stamp": a["statusSince"], "reason": "the time came", "why_not": "a draft"}}
+        self.assertEqual(len(q.classify([a], {"sessions": {"a": e}}, NOW, DEFAULT_CONFIG)["need"]), 1)
+        e["woke"]["delivered"] = True
+        self.assertEqual(len(q.classify([a], {"sessions": {"a": e}}, NOW, DEFAULT_CONFIG)["working"]), 1)
+
     def test_open_question_shows_although_the_session_set_a_wait(self):
         a = dict(sess("a", status="waiting"), pid=7)
         st = {"sessions": {}, "pending": {"a": {"pid": 7, "until": NOW.timestamp() * 1000 + H, "note": "x"}}}

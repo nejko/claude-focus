@@ -8,13 +8,19 @@ UNSCORED_PRIORITY = 50
 # waits for the next prompt), waiting (a question or permission prompt).
 # Like Claude Code's own agent view, busy and shell count as working; an
 # unknown future status is treated as working too, never as "needs the user".
-# A shell session is scored all the same: its turn can have asked the user
-# for something (shell_asks_user).
+# But a shell session's turn has ended: a wait it set runs, a wake-up can be
+# typed into its prompt, and it is scored, since its turn can have asked the
+# user for something (shell_asks_user).
 NEEDS_USER = ("idle", "waiting")
+AT_PROMPT = ("idle", "shell")  # the turn has ended and the prompt takes a message
 
 
 def working(s):
     return s["status"] not in NEEDS_USER
+
+
+def turn_ended(s):
+    return s["status"] in NEEDS_USER + AT_PROMPT
 WOKE_MIN_PRIORITY = 70  # a wake-up that could not be delivered needs the user
 
 
@@ -127,7 +133,12 @@ def classify(sessions, state, now, cfg):
         e = entry(state, s["key"])
         stamp = s["statusSince"]
         item = {"s": s, "e": e, "score": e.get("score"), "fresh": fresh_score(e, stamp)}
-        if working(s) and not shell_asks_user(state, s, e, item["fresh"]):
+        # A shell session that waits, has an undelivered wake-up, or asks the
+        # user goes where an idle one would; else it works on its shells.
+        woke = e.get("woke")
+        if working(s) and not (s["status"] == "shell" and (
+                hidden_by_wait(state, s) or (woke and not woke.get("delivered") and woke.get("stamp") == stamp)
+                or shell_asks_user(state, s, e, item["fresh"]))):
             out["working"].append(item)
             continue
         p = hidden_by_wait(state, s)

@@ -86,6 +86,17 @@ class WaitKeptTest(unittest.TestCase):
         self.entries.append(prompt(ARMED + 70 * MIN, "is this session still doing something?"))
         self.assertIsNone(self.tick("busy", ARMED + 70 * MIN))
 
+    def test_a_wait_runs_while_background_shells_run(self):
+        # klemen-ama, 2026-10-22: its turn ended at 12:16 with one background shell
+        # still running; its wait (a check every 20 minutes) never armed, and no
+        # check ran in the hour after.
+        store.update_state(lambda st: st["pending"]["s1"].update(armed_stamp=None, until=ARMED + 54 * MIN))
+        self.assertIsNone(self.tick("busy", ARMED + MIN)["armed_stamp"])  # the turn still runs
+        self.assertEqual(self.tick("shell", ARMED + 2 * MIN)["armed_stamp"], ARMED + 2 * MIN)
+        self.app.fire.assert_not_called()
+        self.tick("shell", ARMED + 2 * MIN)
+        self.app.fire.assert_called_once()
+
     def test_no_wake_up_while_it_compacts(self):
         store.update_state(lambda st: st["pending"]["s1"].__setitem__("until", ARMED + 54 * MIN))
         self.entries += COMPACTION

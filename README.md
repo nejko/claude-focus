@@ -359,6 +359,10 @@ or the check exits 0, the engine types a one-line wake-up message into the
 session's prompt and submits it, so Claude continues by itself. The message
 tells Claude to ask you before any irreversible or outward-facing step.
 
+The wait starts when the turn that set it ends, also when background shells
+that the session started still run (`◌ shells`): its prompt takes the
+wake-up all the same.
+
 With `--needs`, the session shows under YOUR TO-DOS with that request until
 you press d, and the wait still wakes it.
 

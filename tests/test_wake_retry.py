@@ -58,6 +58,15 @@ class RetryTest(unittest.TestCase):
         self.assertTrue(store.load_state()["sessions"]["a"]["woke"]["delivered"])
         self.assertEqual(self.retry(store.load_state()["sessions"]["a"]), [])  # never twice
 
+    def test_a_session_whose_shells_run_takes_the_wakeup(self):
+        # Its turn has ended; only background shells it started still run.
+        self.app.sessions[0]["status"] = "shell"
+        self.assertTrue(self.retry({"woke": self.woke()})[0].startswith(pend.WAKE_PREFIX))
+        self.app.bridge = FakeBridge(EMPTY)
+        asyncio.run(self.app.fire(self.app.sessions[0], {"until": STAMP, "note": "slides"}, "time"))
+        self.assertTrue(self.app.bridge.sent[0].startswith(pend.WAKE_PREFIX))
+        self.assertTrue(store.load_state()["sessions"]["a"]["woke"]["delivered"])
+
     def test_types_it_while_snoozed(self):
         self.assertEqual(len(self.retry({"woke": self.woke(), "snooze_until": STAMP * 2,
                                          "snooze_stamp": STAMP})), 1)

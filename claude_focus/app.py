@@ -434,7 +434,7 @@ class App:
                 store.log(f"pending dropped, session closed: {p.get('name')}")
                 continue
             if p.get("armed_stamp") is None:
-                if not q.working(s):  # the turn that set the wait has ended
+                if q.turn_ended(s):  # the turn that set the wait has ended (its shells may still run)
                     store.update_state(lambda st: st["pending"][sid].__setitem__("armed_stamp", s["statusSince"]))
                     self._answer_seen(s, sid, p)
                 continue
@@ -450,8 +450,8 @@ class App:
                         pend.clear_pending(sid)
                         store.log(f"pending cleared, {store.user()} typed (seen in the transcript): {s.get('name')}")
                         continue
-                if q.working(s):
-                    continue  # no wake-up while it works
+                if not q.turn_ended(s):
+                    continue  # no wake-up while a turn runs
                 store.update_state(lambda st: st["pending"][sid].__setitem__("armed_stamp", s["statusSince"]))
                 store.log(f"pending kept, {s.get('name')} was active without a prompt from {store.user()}")
             self._answer_seen(s, sid, p)
@@ -486,7 +486,7 @@ class App:
     def _answer_seen(self, s, sid, p):
         """The automatic to-do "read its answer" (pend.READ_ANSWER) is done
         once the user's keys are in the session's pane after the turn ended."""
-        if not p.get("needs_auto") or p.get("needs_done") or q.working(s) or not self._user_in(s):
+        if not p.get("needs_auto") or p.get("needs_done") or not q.turn_ended(s) or not self._user_in(s):
             return
 
         def fn(st):
@@ -532,7 +532,7 @@ class App:
         pane = self.pane_of(s)
         if not pane:
             ok, why = False, f"no {self.bridge.label} pane"
-        elif s["status"] != "idle":
+        elif s["status"] not in q.AT_PROMPT:
             ok, why = False, ("the session waits on a question" if s["status"] == "waiting"
                               else f"the session is not at its prompt (status {s['status']})")
         else:
@@ -557,7 +557,7 @@ class App:
             e = state["sessions"].get(s["key"], {})
             wk = e.get("woke")
             if (not wk or wk.get("delivered") or wk.get("stamp") != s["statusSince"]
-                    or s["status"] != "idle" or e.get("dismissed_stamp") == s["statusSince"]
+                    or s["status"] not in q.AT_PROMPT or e.get("dismissed_stamp") == s["statusSince"]
                     or self._user_in(s)):
                 continue
             pane = self.pane_of(s)
