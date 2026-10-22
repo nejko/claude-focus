@@ -136,6 +136,108 @@ CLAUDE_LIGHT = dict(CLAUDE_DARK, **{
              "fmt": ("{}", " {}"), "sep": " · ", "bg": None},
 })
 
-THEMES = {"norton": (NORTON, NORTON), "qbasic": (QBASIC, QBASIC), "turbo-pascal": (TURBO_PASCAL, TURBO_PASCAL),
-          "clipper": (CLIPPER, CLIPPER), "total-commander": (TOTAL_COMMANDER, TOTAL_COMMANDER),
-          "claude-code": (CLAUDE_DARK, CLAUDE_LIGHT)}
+# Midnight Commander (its default skin): light grey on blue in single-line
+# frames, the panel's title and the selection black on cyan, and the key bar
+# like Norton Commander's.
+MIDNIGHT = {
+    "bg": (0, 0, 170),
+    "text": (255, 255, 255), "soft": (170, 170, 170), "dim": (0, 170, 170), "faint": (0, 170, 170),
+    "track": (0, 0, 110), "key": (0, 0, 0), "alert": (255, 85, 85),
+    "need": (255, 255, 85), "todo": (255, 255, 255), "pending": (85, 255, 255),
+    "working": (170, 170, 170), "free": (0, 170, 170), "terminals": (85, 255, 85),
+    "high": (255, 85, 85), "mid": (255, 255, 85), "low": (0, 170, 170),
+    "paint": True, "frame": (170, 170, 170), "box": SINGLE, "marker": " ",
+    "title": ("~/claude-focus", (0, 0, 0), (0, 170, 170)),
+    "select": ((0, 0, 0), (0, 170, 170)),
+    "bar": ((0, 0, 0), (0, 170, 170)),
+    "keys": {"cap": ((170, 170, 170), (0, 0, 0)), "label": ((0, 0, 0), (0, 170, 170)),
+             "fmt": ("{}", "{} "), "sep": " ", "bg": (0, 0, 0)},
+}
+
+# Commodore 64 (the Pepto palette): light blue capitals on blue inside a thick
+# light blue border, reverse video for the bars.
+C64 = {
+    "bg": (53, 40, 121),
+    "text": (255, 255, 255), "soft": (108, 94, 181), "dim": (108, 94, 181), "faint": (80, 68, 150),
+    "track": (40, 30, 95), "key": (108, 94, 181), "alert": (154, 103, 89),
+    "need": (184, 199, 111), "todo": (112, 164, 178), "pending": (154, 103, 89),
+    "working": (149, 149, 149), "free": (108, 94, 181), "terminals": (154, 210, 132),
+    "high": (154, 103, 89), "mid": (184, 199, 111), "low": (108, 94, 181),
+    "paint": True, "upper": True, "frame": (108, 94, 181), "box": "█" * 8, "marker": " ",
+    "title": ("**** COMMODORE 64 BASIC V2 ****", (108, 94, 181), None),
+    "select": ((53, 40, 121), (108, 94, 181)),
+    "bar": ((53, 40, 121), (108, 94, 181)),
+    "keys": {"cap": ((53, 40, 121), (108, 94, 181)), "label": ((108, 94, 181), None),
+             "fmt": ("{}", " {}"), "sep": "  ", "bg": None},
+}
+
+
+def monitor(bg, bright, normal, dim, faint):
+    """A monochrome monitor: one phosphor color in four strengths, reverse
+    video for the bars."""
+    return {"bg": bg, "text": bright, "soft": normal, "dim": dim, "faint": faint, "track": faint, "key": faint,
+            "alert": bright, "need": bright, "todo": bright, "pending": normal, "working": normal,
+            "free": dim, "terminals": normal, "high": bright, "mid": normal, "low": dim,
+            "paint": True, "marker": " ", "select": (bg, bright), "bar": (bg, bright),
+            "keys": {"cap": (bg, normal), "label": (normal, None), "fmt": ("{}", " {}"), "sep": "  ", "bg": None}}
+
+
+GREEN = monitor((5, 12, 5), (51, 255, 51), (38, 190, 38), (26, 128, 26), (14, 60, 14))
+AMBER = monitor((12, 8, 0), (255, 176, 0), (200, 138, 0), (140, 96, 0), (64, 44, 0))
+
+
+def scheme(bg, text, soft, dim, faint, track, need, todo, pending, working, terminals, alert, mid, accent):
+    """A modern color scheme: the default's drawing on the scheme's own
+    background, its accent for the title bar while the window has the keys."""
+    return {"bg": bg, "text": text, "soft": soft, "dim": dim, "faint": faint, "track": track, "key": faint,
+            "alert": alert, "need": need, "todo": todo, "pending": pending, "working": working, "free": dim,
+            "terminals": terminals, "high": alert, "mid": mid, "low": dim, "paint": True, "bar": (bg, accent)}
+
+
+# Each scheme's own palette file: background, text, comments, accents.
+DRACULA = scheme((40, 42, 54), (248, 248, 242), (208, 208, 202), (98, 114, 164), (68, 71, 90), (52, 55, 70),
+                 (255, 121, 198), (189, 147, 249), (255, 184, 108), (139, 233, 253), (80, 250, 123),
+                 (255, 85, 85), (241, 250, 140), (189, 147, 249))
+SOLARIZED_DARK = scheme((0, 43, 54), (147, 161, 161), (131, 148, 150), (88, 110, 117), (7, 54, 66), (7, 54, 66),
+                        (203, 75, 22), (38, 139, 210), (181, 137, 0), (42, 161, 152), (133, 153, 0),
+                        (220, 50, 47), (181, 137, 0), (38, 139, 210))
+SOLARIZED_LIGHT = scheme((253, 246, 227), (7, 54, 66), (88, 110, 117), (147, 161, 161), (238, 232, 213),
+                         (238, 232, 213), (203, 75, 22), (38, 139, 210), (181, 137, 0), (42, 161, 152),
+                         (133, 153, 0), (220, 50, 47), (181, 137, 0), (38, 139, 210))
+NORD = scheme((46, 52, 64), (236, 239, 244), (216, 222, 233), (136, 146, 166), (67, 76, 94), (59, 66, 82),
+              (208, 135, 112), (136, 192, 208), (235, 203, 139), (143, 188, 187), (163, 190, 140),
+              (191, 97, 106), (235, 203, 139), (136, 192, 208))
+GRUVBOX_DARK = scheme((40, 40, 40), (235, 219, 178), (213, 196, 161), (146, 131, 116), (80, 73, 69), (60, 56, 54),
+                      (254, 128, 25), (131, 165, 152), (250, 189, 47), (142, 192, 124), (184, 187, 38),
+                      (251, 73, 52), (250, 189, 47), (250, 189, 47))
+GRUVBOX_LIGHT = scheme((251, 241, 199), (60, 56, 54), (80, 73, 69), (146, 131, 116), (213, 196, 161),
+                       (235, 219, 178), (175, 58, 3), (7, 102, 120), (181, 118, 20), (66, 123, 88), (121, 116, 14),
+                       (157, 0, 6), (181, 118, 20), (181, 118, 20))
+TOKYO_NIGHT = scheme((26, 27, 38), (192, 202, 245), (169, 177, 214), (115, 122, 162), (59, 66, 97), (41, 46, 66),
+                     (255, 158, 100), (122, 162, 247), (224, 175, 104), (125, 207, 255), (158, 206, 106),
+                     (247, 118, 142), (224, 175, 104), (122, 162, 247))
+CATPPUCCIN_MOCHA = scheme((30, 30, 46), (205, 214, 244), (186, 194, 222), (127, 132, 156), (69, 71, 90),
+                          (49, 50, 68), (243, 139, 168), (137, 180, 250), (249, 226, 175), (137, 220, 235),
+                          (166, 227, 161), (243, 139, 168), (250, 179, 135), (203, 166, 247))
+CATPPUCCIN_LATTE = scheme((239, 241, 245), (76, 79, 105), (92, 95, 119), (140, 143, 161), (204, 208, 218),
+                          (220, 224, 232), (210, 15, 57), (30, 102, 245), (223, 142, 29), (4, 165, 229),
+                          (64, 160, 43), (210, 15, 57), (254, 100, 11), (136, 57, 239))
+
+THEMES = {
+    "norton": (NORTON, NORTON), "midnight-commander": (MIDNIGHT, MIDNIGHT), "qbasic": (QBASIC, QBASIC),
+    "turbo-pascal": (TURBO_PASCAL, TURBO_PASCAL), "clipper": (CLIPPER, CLIPPER),
+    "total-commander": (TOTAL_COMMANDER, TOTAL_COMMANDER), "c64": (C64, C64),
+    "green-screen": (GREEN, GREEN), "amber-screen": (AMBER, AMBER), "claude-code": (CLAUDE_DARK, CLAUDE_LIGHT),
+    "dracula": (DRACULA, DRACULA), "solarized": (SOLARIZED_DARK, SOLARIZED_LIGHT), "nord": (NORD, NORD),
+    "gruvbox": (GRUVBOX_DARK, GRUVBOX_LIGHT), "tokyo-night": (TOKYO_NIGHT, TOKYO_NIGHT),
+    "catppuccin": (CATPPUCCIN_MOCHA, CATPPUCCIN_LATTE),
+}
+
+ABOUT = {  # for the theme preview (key t)
+    "default": "the default look", "norton": "Norton Commander", "midnight-commander": "Midnight Commander",
+    "qbasic": "Microsoft QBasic 1.1", "turbo-pascal": "Borland Turbo Pascal 7", "clipper": "a Clipper application",
+    "total-commander": "Total Commander", "c64": "Commodore 64", "green-screen": "a green phosphor monitor",
+    "amber-screen": "an amber monitor", "claude-code": "Claude Code", "dracula": "Dracula",
+    "solarized": "Solarized, dark or light", "nord": "Nord", "gruvbox": "Gruvbox, dark or light",
+    "tokyo-night": "Tokyo Night", "catppuccin": "Catppuccin, Mocha or Latte",
+}

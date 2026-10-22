@@ -59,6 +59,15 @@ def width(s):
     return len(ANSI.sub("", s))
 
 
+def upper(line):
+    """A line's text in capitals, its color codes as they are."""
+    out, pos = [], 0
+    for m in ANSI.finditer(line):
+        out += [line[pos:m.start()].upper(), m.group()]
+        pos = m.end()
+    return "".join(out) + line[pos:].upper()
+
+
 def cut(text, n):
     """Plain text to at most n columns, with … where it was cut."""
     if n <= 0:

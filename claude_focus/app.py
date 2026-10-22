@@ -153,6 +153,7 @@ class App:
         self.claude_panes = {}    # iterm session id -> (session name, Unix s last seen) of panes that ran a session
         self.pal = look.DARK      # the colors now: config "theme" for the terminal's appearance
         self.appearance = "dark"  # the terminal's appearance (bridge.theme)
+        self.theme_was = None     # the theme from before the preview (theme_step)
         self.pick = None          # the folder picker: {"term": free terminal, "sel": row}
         self.folders = []         # its folders (see folders.candidates)
         self.matches = []         # the folders that match what the user typed (self.buf)
@@ -752,16 +753,27 @@ class App:
         self.sel = None
         await self.bridge.go(term["pane"], zoom=self.cfg["zoom"])
 
-    def next_theme(self, step=1):
-        """Key t: the next theme of look.THEMES (T: the one before), kept in the config."""
-        names = list(look.THEMES)
-        now = self.cfg["theme"]
+    def theme_step(self, step):
+        """t and T: the screen shows the next theme of look.THEMES (or the
+        one before) at once. Enter keeps it; Esc goes back to the theme from
+        before the first t (keep_theme)."""
+        if self.mode != "themes":
+            self.mode, self.theme_was = "themes", self.cfg["theme"]
+        names, now = list(look.THEMES), self.cfg["theme"]
         name = names[(names.index(now) + step) % len(names)] if now in names else names[0]
         self.cfg["theme"] = name
         self.pal = look.palette(self.appearance, name)
+
+    def keep_theme(self, keep):
+        """End the theme preview: keep the theme shown (in the config), or go back."""
+        self.mode = "main"
+        if not keep:
+            self.cfg["theme"] = self.theme_was
+            self.pal = look.palette(self.appearance, self.theme_was)
+            return
         store.ensure()
-        store._write(store.CONFIG, dict(store._read(store.CONFIG, {}), theme=name))
-        self.flash(f"Theme {names.index(name) + 1} of {len(names)}: {name}. t: the next one, T: the one before.")
+        store._write(store.CONFIG, dict(store._read(store.CONFIG, {}), theme=self.cfg["theme"]))
+        self.flash(f"Theme: {self.cfg['theme']}. t shows the others.")
 
     def _update_selected(self, fn, done_text):
         sec, item = self.selected()
@@ -868,7 +880,7 @@ class App:
             elif key == "n":
                 await self.pick_folder()
             elif key in ("t", "T"):
-                self.next_theme(1 if key == "t" else -1)
+                self.theme_step(1 if key == "t" else -1)
             elif sec == "terminals" and key in ("s", "p", "d", "u", "r"):
                 self.flash("A free terminal: Enter starts a new session in it.")
             elif key == "s" and item:
@@ -973,6 +985,13 @@ class App:
             elif key == "\t":
                 self.mode = "main"
                 await self.go_terminal(term)
+        elif self.mode == "themes":
+            if key in ("t", "j", "\x1b[B", "\x1bOB", "\x1b[C", "\x1bOC"):
+                self.theme_step(1)
+            elif key in ("T", "k", "\x1b[A", "\x1bOA", "\x1b[D", "\x1bOD"):
+                self.theme_step(-1)
+            else:  # Esc goes back; Enter, or any other key, keeps the theme
+                self.keep_theme(key != "\x1b")
         self.wake.set()
 
     # ---- render -----------------------------------------------------------
@@ -1254,6 +1273,8 @@ class App:
             shown = [self._framed(x, inner) for x in shown]
             bottom_lines[0] = self._framed(bottom_lines[0], inner)
         lines = [fit(x, w) for x in top_lines + shown + bottom_lines]
+        if P.get("upper"):
+            lines = [look.upper(x) for x in lines]
         if P.get("paint"):  # every line on the theme's background, the keys on theirs; \033[K fills the rest
             keys_bg = (P.get("keys") or {}).get("bg") or P["bg"]
             lines = [look.on(x, keys_bg if n == len(lines) - 1 else P["bg"], w)[:-len(R)]
@@ -1294,6 +1315,13 @@ class App:
                     f"YYYY-MM-DD HH:MM){R}  {fg(P['text'])}{self.buf}█{R}")
         if self.mode == "priority":
             return f"  {fg(P['need'])}{B}Priority{R} {fg(P['dim'])}1-100 (0 = automatic){R}  {fg(P['text'])}{self.buf}█{R}"
+        if self.mode == "themes":
+            names, name = list(look.THEMES), self.cfg["theme"]
+            n = names.index(name) + 1 if name in names else 0
+            return (f"  {fg(P['text'])}{B}Theme {n}/{len(names)}: {name}{R}  {fg(P['dim'])}"
+                    f"{themes.ABOUT.get(name, '')}{R}   " + self._sep().join([
+                        self._key("↑↓", "other theme"), self._key("⏎", "keep it"),
+                        self._key("esc", f"back to {self.theme_was}")]))
         if self.mode == "start":
             return "  " + self._sep().join([self._key("⏎", "start"), self._key("↑↓", "select"),
                                      self._key("⇥", "just go to the terminal"), self._key("esc", "back to the folders")])

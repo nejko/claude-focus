@@ -221,17 +221,33 @@ class ThemeTest(unittest.TestCase):
         self.assertIs(look.palette("light", "norton"), NORTON)  # blue in a light terminal too
         self.assertIs(look.palette("dark", "no-such-theme"), look.DARK)
 
-    def test_t_switches_and_keeps_the_theme(self):
+    def keys(self, *keys):
+        for k in keys:
+            asyncio.run(self.app.on_key(k))
+
+    def test_t_shows_the_next_theme_and_enter_keeps_it(self):
         self.app.flash = mock.Mock()
         self.assertEqual(self.app.cfg["theme"], "default")
-        asyncio.run(self.app.on_key("t"))
-        self.assertEqual((self.app.cfg["theme"], self.app.pal), ("norton", NORTON))
-        self.assertEqual(appmod.store.load_config()["theme"], "norton")
+        self.keys("t")
+        self.assertEqual((self.app.mode, self.app.cfg["theme"], self.app.pal), ("themes", "norton", NORTON))
+        self.assertEqual(appmod.store.load_config()["theme"], "default")  # only shown so far
+        screen = self.screen([self.short], "short", lines=30)
+        self.assertIn(f"Theme 2/{len(look.THEMES)}: norton", screen[-1])
+        self.assertIn("back to default", screen[-1])
+        self.keys("t", "\x1b[A", "\r")  # the next one, back again, keep
+        self.assertEqual((self.app.mode, appmod.store.load_config()["theme"]), ("main", "norton"))
         self.assertIn("norton", self.app.flash.call_args[0][0])
-        asyncio.run(self.app.on_key("T"))  # back
-        self.assertEqual((self.app.pal, appmod.store.load_config()["theme"]), (look.DARK, "default"))
-        asyncio.run(self.app.on_key("T"))  # and round: the last theme
+
+    def test_esc_goes_back_to_the_theme_before(self):
+        self.keys("T")  # round: the last theme
         self.assertEqual(self.app.cfg["theme"], list(look.THEMES)[-1])
+        self.keys("T", "\x1b")
+        self.assertEqual((self.app.mode, self.app.cfg["theme"], self.app.pal), ("main", "default", look.DARK))
+        self.assertEqual(appmod.store.load_config()["theme"], "default")
+
+    def test_upper(self):
+        line = look.fg((1, 2, 3)) + "ready." + look.R + " ~/x"
+        self.assertEqual(look.upper(line), look.fg((1, 2, 3)) + "READY." + look.R + " ~/X")
 
     def test_norton_commander(self):
         self.app.pal = NORTON
@@ -263,7 +279,7 @@ class ThemeTest(unittest.TestCase):
                         self.assertTrue(screen[1].startswith(box[0]) and screen[1].endswith(box[2]))
                         self.assertTrue(screen[-2].startswith(box[4]) and screen[-2].endswith(box[5]))
                         self.assertTrue(all(len(x) == 119 and x[0] in box[3] + box[6] for x in screen[2:-2]))
-                    self.assertIn("go", screen[-1])
+                    self.assertIn("go", screen[-1].lower())
 
     def test_the_default_theme_has_no_frame_and_no_paint(self):
         raw = self.screen([self.short], "short", lines=30, raw=True)
