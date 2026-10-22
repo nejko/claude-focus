@@ -8,6 +8,8 @@ UNSCORED_PRIORITY = 50
 # waits for the next prompt), waiting (a question or permission prompt).
 # Like Claude Code's own agent view, busy and shell count as working; an
 # unknown future status is treated as working too, never as "needs the user".
+# A shell session is scored all the same: its turn can have asked the user
+# for something (shell_asks_user).
 NEEDS_USER = ("idle", "waiting")
 
 
@@ -82,6 +84,17 @@ def open_needs(p):
     return p.get("needs") if p and not p.get("needs_done") else None
 
 
+def shell_asks_user(s, e, sc):
+    """A shell session (its turn ended, background shells it started still
+    run) usually waits for its own work and stays under WORKING. It needs the
+    user when its turn ended with a request: pick a design on a page that a
+    background server shows, try a dev server. The scorer has read that turn
+    and did not say that nothing is needed, and the user has not marked it
+    done (then it is working again: the shells wake it when they end)."""
+    return (s["status"] == "shell" and bool(sc) and not nothing_needed(sc)
+            and e.get("dismissed_stamp") != s["statusSince"])
+
+
 def hidden_by_wait(state, s):
     """The wait that keeps this session out of NEED YOU, or None. An open
     question (or permission prompt) always shows, also when the session set
@@ -104,7 +117,7 @@ def classify(sessions, state, now, cfg):
         e = entry(state, s["key"])
         stamp = s["statusSince"]
         item = {"s": s, "e": e, "score": e.get("score"), "fresh": fresh_score(e, stamp)}
-        if working(s):
+        if working(s) and not shell_asks_user(s, e, item["fresh"]):
             out["working"].append(item)
             continue
         p = hidden_by_wait(state, s)

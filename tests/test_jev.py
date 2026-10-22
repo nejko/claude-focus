@@ -1,8 +1,9 @@
+import datetime as dt
 import unittest
 
 import _env  # noqa: E402,F401  (first: a scratch CLAUDE_FOCUS_DIR)
 
-from claude_focus import ask, jev, store  # noqa: E402
+from claude_focus import ask, jev, scorer, store  # noqa: E402
 
 RULE = "─" * 60
 QUESTION_SCREEN = (
@@ -201,3 +202,12 @@ class AskWriterTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StateTextTest(unittest.TestCase):
+    def test_both_scorers_learn_what_a_shell_session_is(self):
+        self.assertEqual(scorer.state_text({"status": "waiting", "waitingFor": "permission"}), "waiting permission")
+        shell = {"status": "shell", "cwd": "/x", "name": "n"}
+        self.assertTrue(scorer.state_text(shell).startswith("shell (its turn has ended, but background shells"))
+        prompt = scorer.build_prompt(shell, "", "", dt.datetime(2026, 10, 22, 11, 0))
+        self.assertIn("STATE: shell (its turn has ended", prompt)

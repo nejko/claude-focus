@@ -49,8 +49,8 @@ report is not urgent by itself. {User}'s own priority rules below override this 
 Fields:
 - kind: decision ({user} must choose), action ({user} must do something themselves: \
 send, sign, ship, click, pay), login ({user} must log in or authenticate somewhere), \
-review (read and approve), info (report only), nothing (the session is done or says \
-that nothing is needed from {user}).
+review (read and approve), info (report only), nothing (the session is done, says \
+that nothing is needed from {user}, or only waits for its own background work).
 - ask: what {user} must do now, imperative, max 100 characters, English. Name what \
 must be decided or done; do not quote option labels or say which option is \
 recommended.
@@ -69,6 +69,15 @@ def system_prompt():
     return store.say(SYSTEM.replace("{who}", "{user}" + (f", {role}" if role else "")))
 
 
+def state_text(sess):
+    """The session's status for the scorers, with what a shell session is."""
+    text = f"{sess['status']} {sess.get('waitingFor', '')}".strip()
+    if sess["status"] == "shell":
+        text += (" (its turn has ended, but background shells it started still run, for example a "
+                 "server, a watcher or a wait loop; when one ends, the session continues by itself)")
+    return text
+
+
 def build_prompt(sess, screen, last_text, now):
     # No waiting time here: the queue adds its own bonus for waiting, and
     # the scorer would count it twice.
@@ -76,7 +85,7 @@ def build_prompt(sess, screen, last_text, now):
     parts = [
         f"NOW: {now.strftime('%A %Y-%m-%d %H:%M')} ({store.user()}'s local time, {store.local_zone()}, {tz})",
         f"SESSION: {sess.get('name', '')}  (folder {sess['cwd']})",
-        f"STATE: {sess['status']} {sess.get('waitingFor', '')}",
+        f"STATE: {state_text(sess)}",
         "",
         "=== WHAT IS ON ITS SCREEN NOW (bottom of the terminal) ===",
         screen.strip() or "(not available)",

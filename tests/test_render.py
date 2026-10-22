@@ -104,6 +104,14 @@ class LayoutTest(unittest.TestCase):
         self.assertFalse(any("needs a restart" in x for x in screen))
         self.assertIn("scoring...", screen[self.rows_at(screen, ["f3"])["f3"]])
 
+    def test_a_shell_session_in_need_you_says_so(self):
+        item = need("pick", "Pick a design on the page")
+        item["s"]["status"] = "shell"
+        screen = self.screen([item, self.short], "pick")
+        rows = self.rows_at(screen, ["pick", "short"])
+        self.assertIn("◌ shells  Pick a design on the page", screen[rows["pick"]])
+        self.assertNotIn("shells", screen[rows["short"]])
+
     def test_green_title_bar_only_while_the_window_has_the_keys(self):
         for focused in (True, False):
             self.app.focused = focused

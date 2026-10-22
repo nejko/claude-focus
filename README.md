@@ -178,12 +178,18 @@ claude-focus uninstall        # undo setup
 
 The sections, top to bottom:
 
-- NEED YOU: the session waits for your answer, ranked by priority.
+- NEED YOU: the session waits for your answer, ranked by priority. A
+  session whose turn ended with a request to you while its background
+  shells still run (a page to pick from, a dev server to try) is here too,
+  marked `◌ shells`.
 - YOUR TO-DOS: the session waits for something external and left you a
   task meanwhile (send a draft, sign, pay). Oldest first.
 - PENDING: the session waits for a time or a check, or you snoozed it.
   Next wake-up first.
-- WORKING: the session is busy, or its background shells still run.
+- WORKING: the session is busy, or its background shells still run and it
+  only waits for them: when they end, it continues by itself. The scorer
+  reads such a turn too, and it moves to NEED YOU when it asks you for
+  something.
 - FREE: nothing is needed; you can close or reuse the terminal.
 - AVAILABLE TERMINALS: free panes, ready for a new session (see "Free
   terminals").

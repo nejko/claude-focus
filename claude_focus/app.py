@@ -296,7 +296,9 @@ class App:
         todo = []
         for s in self.sessions:
             key = s["key"]
-            if q.working(s) or key in self.scoring or q.hidden_by_wait(state, s):
+            # A shell session is scored too: its turn may have asked the user
+            # for something (queue.shell_asks_user).
+            if (q.working(s) and s["status"] != "shell") or key in self.scoring or q.hidden_by_wait(state, s):
                 continue
             if self._user_in(s):
                 continue  # the user is in this session now; score it when they leave
@@ -1068,6 +1070,8 @@ class App:
             done = item["e"].get("dismissed_stamp") == s["statusSince"]
             lead, age, kind = f"{fg(acc)}○{R}", since, "done" if done else "nothing"
             text = sc.get("ask") or item.get("why", "")
+        if sec != "working" and s["status"] == "shell":
+            tags.append(f"{dim}◌ shells{R}")  # it asks the user while its background shells run
         if s.get("dup"):
             tags.append(f"{alert}{B}DUPLICATE ×{s['dup']}{R}")
         if item["e"].get("skips"):

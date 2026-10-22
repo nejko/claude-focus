@@ -9,7 +9,7 @@ the session needs the user; the company comes from the folder name."""
 import datetime as dt
 import os
 
-from . import ask, store
+from . import ask, scorer, store
 
 USD_PER_INPUT_TOKEN = 0.042 / 1_000_000
 CREDENTIALS = os.path.expanduser("~/.config/claude-focus/credentials")
@@ -126,7 +126,7 @@ async def score(sess, screen, last_text, cfg, now=None):
         "now": f"{now.strftime('%A %Y-%m-%d %H:%M')} ({store.user()}'s local time, {store.local_zone()})",
         "session": sess.get("name", ""),
         "folder": sess["cwd"],
-        "state": f"{sess['status']} {sess.get('waitingFor', '')}".strip(),
+        "state": scorer.state_text(sess),
         "screen": screen,
         "last_message": last_text,
         "priority_rules": store.priorities_text(),

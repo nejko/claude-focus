@@ -43,6 +43,31 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(len(v["working"]), 2)
         self.assertEqual(v["need"], [])
 
+    def test_a_shell_session_that_asks_the_user_needs_them(self):
+        # zupnijska-stran, 2026-10-22: its turn ended with "pick a design on the page"
+        # while three background shells served the page; it sat under WORKING for
+        # an hour and more, as "shells".
+        asks, waits, unscored, done, later = (sess(n, status="shell")
+                                              for n in ("asks", "waits", "unscored", "done", "later"))
+        until = (NOW + dt.timedelta(hours=1)).timestamp() * 1000
+        v = self.classify([asks, waits, unscored, done, later], {
+            "asks": {"score": score(asks["statusSince"], 60)},
+            "waits": {"score": score(waits["statusSince"], 10, kind="nothing")},
+            "done": {"score": score(done["statusSince"], 60), "dismissed_stamp": done["statusSince"]},
+            "later": {"score": score(later["statusSince"], 60), "snooze_until": until,
+                      "snooze_stamp": later["statusSince"]},
+        })
+        self.assertEqual([i["s"]["sessionId"] for i in v["need"]], ["asks"])
+        self.assertEqual([i["s"]["sessionId"] for i in v["pending"]], ["later"])
+        # It waits for its own work, it is not scored yet, or the user marked it
+        # done: working, and the shells wake it when they end.
+        self.assertEqual(sorted(i["s"]["sessionId"] for i in v["working"]), ["done", "unscored", "waits"])
+
+    def test_a_score_of_the_turn_before_the_shells_does_not_count(self):
+        a = sess("a", status="shell")
+        v = self.classify([a], {"a": {"score": score(a["statusSince"] - 5000, 90)}})
+        self.assertEqual([i["s"]["sessionId"] for i in v["working"]], ["a"])
+
     def test_aging_lifts_a_neglected_session(self):
         old, new = sess("old", waited_h=200), sess("new", waited_h=0.1)
         v = self.classify([old, new], {
