@@ -1332,14 +1332,14 @@ class App:
                         self._key("esc", f"back to {self.theme_was}")]))
         if self.mode == "start":
             return "  " + self._sep().join([self._key("⏎", "start"), self._key("↑↓", "select"),
-                                     self._key("⇥", "just go to the terminal"), self._key("esc", "back to the folders")])
+                                     self._key("tab", "just go to the terminal"), self._key("esc", "back to the folders")])
         if self.mode == "folders":
             match = self.matches[self.pick["sel"]] if self.pick["sel"] < len(self.matches) else None
             what = (f"make it, cd there and run {self.cfg['new_session_command']}" if self._creating() else
                     "start there: new, continue or resume" if match and match[2] else
                     f"cd there and run {self.cfg['new_session_command']}")
             return "  " + self._sep().join([self._key("⏎", what),
-                                     self._key("↑↓", "select"), self._key("⇥", "just go to the terminal"),
+                                     self._key("↑↓", "select"), self._key("tab", "just go to the terminal"),
                                      self._key("esc", "cancel")])
         keys = [("⏎", "go"), ("↑↓", "select"), ("esc", "top"), ("n", "new session"), ("s", "snooze"),
                 ("u", "unwait"), ("p", "priority"), ("d", "done"), ("r", "rescore"), ("t", "theme"),
