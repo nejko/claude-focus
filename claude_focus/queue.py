@@ -3,9 +3,10 @@ and compute the effective priority. No I/O here, so tests can drive it."""
 import datetime as dt
 
 UNSCORED_PRIORITY = 50
-# A score comes about 17 s after a turn ends (27 s at the 90th percentile,
-# state.json on 2026-10-22); until then, or this long, the session waits
-# under WORKING as "scoring".
+# A score came about 17 s after a turn ended (state.json on 2026-10-22), 15 s
+# of it the wait for a stable status, which is 4 s with jev since 2026-10-24
+# (app.STABLE_SECONDS). Until then, or this long, the session waits under
+# WORKING as "scoring".
 SCORING_GRACE_S = 120
 # Claude Code's statuses: busy (a turn runs), shell (the turn ended but
 # background shells still run and will wake the session), idle (done,

@@ -16,13 +16,15 @@ import tty as ttymod
 from . import costs, folders, look
 from . import pending as pend
 from . import queue as q
-from . import restore, scorer, sessions as sessions_mod, store, terminal, themes
+from . import restore, scorer, sessions as sessions_mod, store, terminal, themes, watch
 from .look import B, R, bg, fg, fit, mix, width
 from .screen import EMPTY
 from .terminal import SHELLS
 
 FOCUS_BAR = "\033[1;30;42m"  # the title bar while this window has the keys: bold black on green
-STABLE_SECONDS = 15       # a status must hold this long before it is scored
+# A status must hold this long before it is scored. A Claude score costs
+# about $0.010, a jev score about $0.0001, so jev may score one that changes again.
+STABLE_SECONDS = {"jev": 4, "claude": 15}
 STATUS_FILE = os.path.join(store.DIR, "engine.json")
 TUI_FILE = restore.TUI_FILE
 BIN = shutil.which("claude-focus") or os.path.join(  # installed, else run from the checkout
@@ -34,7 +36,7 @@ ANSWER_POLL = 0.4         # seconds between two looks at a dialog the user went 
 SEEN_WRITE_SECONDS = 30   # while the user stays in one pane, how often its "seen" time is written
 SEEN_KEEP_DAYS = 14
 ENDED_GRACE = 60          # seconds after a session ended in which its pane must be back at a bare shell
-EVENT_PAUSE = 0.3         # seconds: a burst of terminal events (watch_events) makes one poll
+EVENT_PAUSE = 0.3         # seconds: a burst of terminal or file events (watch_events, watch.py) makes one poll
 TERMINAL_CHECK = 60       # seconds between two looks of the service at which terminal runs the sessions
 
 KIND_LABEL = {"decision": "decision", "action": "action", "login": "login",
@@ -95,6 +97,24 @@ def _pid_alive(pid):
         return False
 
 
+def log_status_changes(before, after):
+    """One log line for each session whose status changed since the last poll,
+    and for each that started or ended, so a row that stayed too long in one
+    place can be explained later. Nothing on the first poll (no list yet)."""
+    if not before:
+        return
+    old = {s["key"]: s for s in before}
+    new = {s["key"]: s for s in after}
+    for key, s in new.items():
+        was = old.get(key)
+        if was is None:
+            store.log(f"status {s.get('name')}: started, {s['status']}")
+        elif was["status"] != s["status"]:
+            store.log(f"status {s.get('name')}: {was['status']} -> {s['status']}")
+    for key in old.keys() - new.keys():
+        store.log(f"status {old[key].get('name')}: ended")
+
+
 def tokens(data):
     """Split one read from stdin into keys: arrow keys arrive as ESC [ A."""
     out, i = [], 0
@@ -136,7 +156,7 @@ class App:
         self.remote = {}          # the other engine's status (engine.json) when we are a view
         self.last_status = None
         self.wake = asyncio.Event()
-        self.poll_now = asyncio.Event()  # set by terminal events: poll before poll_seconds pass
+        self.poll_now = asyncio.Event()  # set by terminal and file events: poll before poll_seconds pass
         self.polled = False
         self.run_id = None        # start time of the running iTerm2 (the engine's run)
         self.snap_at = 0
@@ -164,6 +184,8 @@ class App:
     async def poll(self):
         rows = await asyncio.get_event_loop().run_in_executor(None, sessions_mod.list_sessions)
         if rows is not None:
+            if self.engine:
+                log_status_changes(self.sessions, rows)
             self.sessions = rows
         await self.bridge.refresh()
         if not self.headless and not self.passive:
@@ -302,7 +324,7 @@ class App:
                 continue
             if self._user_in(s):
                 continue  # the user is in this session now; score it when they leave
-            if now_ms - s["statusSince"] < STABLE_SECONDS * 1000:
+            if now_ms - s["statusSince"] < STABLE_SECONDS.get(self.cfg["scorer"], 15) * 1000:
                 continue
             sc = q.fresh_score(state["sessions"].get(key, {}), s["statusSince"])
             if sc and now_ms - sc.get("scored_at", 0) < RESCORE_AFTER_H * 3.6e6:
@@ -1411,7 +1433,18 @@ class App:
         store.log(f"service connected to {self.bridge.label} (pid {os.getpid()})")
         asyncio.ensure_future(self._guard("terminal watch", self._watch_terminal()))
         asyncio.ensure_future(self._guard("events", self.bridge.watch_events(self.poll_now.set)))
+        self._start_watch()
         await self.poll_loop()
+
+    def _start_watch(self, folders=()):
+        """Poll at once when a session file or one of folders changes (watch.py).
+        The engine leaves out ~/.claude-focus: it writes there itself."""
+        loop = asyncio.get_event_loop()
+
+        def changed(path):
+            if not (path == store.DIR and self.engine) and not loop.is_closed():
+                loop.call_soon_threadsafe(self.poll_now.set)
+        watch.start(changed, sessions_mod.SESSIONS_DIR, folders)
 
     async def run(self):
         store.ensure()
@@ -1422,6 +1455,7 @@ class App:
         self.focused = await self.bridge.has_focus(own)
         asyncio.ensure_future(self._guard("focus watch", self.bridge.watch_focus(own, self._set_focused)))
         asyncio.ensure_future(self._guard("events", self.bridge.watch_events(self.poll_now.set)))
+        self._start_watch((store.DIR,))  # the service writes the scores there
         loop = asyncio.get_event_loop()
         if self.bridge.restores:
             self.prev_layout = await loop.run_in_executor(

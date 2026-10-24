@@ -190,7 +190,8 @@ The sections, top to bottom:
   only waits for them: when they end, it continues by itself. The scorer
   reads such a turn too, and it moves to NEED YOU when it asks you for
   something. A session that has just answered waits here too, as
-  `scoring`, until its score comes (about 20 seconds); if the score takes
+  `scoring`, until its score comes (with jev about 6 seconds, with the
+  Claude scorer about 20); if the score takes
   longer than 2 minutes, it goes to NEED YOU unscored.
 - FREE: nothing is needed; you can close or reuse the terminal. A session
   that only reported (kind info) comes here by itself once you have been in
@@ -294,9 +295,10 @@ permission prompt, and when you went to another pane or app first.
 
 ## Scoring
 
-When a session has waited for 15 s, and you are not in its pane, a scorer
-reads the bottom of its screen, its last message and your
-`~/.claude-focus/priorities.md`, and rates how much it needs you now:
+When a session has waited for 4 s (jev) or 15 s (Claude scorer), and you
+are not in its pane, a scorer reads the bottom of its screen, its last
+message and your `~/.claude-focus/priorities.md`, and rates how much it
+needs you now:
 
 - a priority from 1 to 100 (five levels, from "nothing needed" to "drop
   everything"),
@@ -618,7 +620,7 @@ remote machine show without a pane.
 | `jev_model` | `"jev-latest"` | The model of the jev scorer |
 | `ask_model` | `"claude-haiku-5-5"` | With jev: the model that writes the one-line request (`""` = off) |
 | `scorer_parallel` | `4` | Sessions scored at the same time |
-| `poll_seconds` | `3` | How often the state is read |
+| `poll_seconds` | `3` | How often the state is read at the latest; a change of a session's status is read at once |
 | `aging_points_per_hour`, `aging_max` | `0.15`, `10` | The bonus for waiting, added to the score; the sum stays at most 100, and at 100 the longer wait goes first |
 | `terminal` | `"auto"` | `"auto"`, `"iterm"` or `"herdr"` (see "Which terminal") |
 | `theme` | `"default"` | The focus screen's look, one of the themes in "Themes" (keys `t` and `T`) |
