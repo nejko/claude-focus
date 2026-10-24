@@ -190,8 +190,10 @@ class Bridge:
         except Exception:
             return "other"
         lines = [clean(c.line(i).string) for i in range(c.number_of_lines)]
-        cur = c.cursor_coord
-        return prompt_state("\n".join(lines), cursor=(cur.x, cur.y))
+        # The cursor's line counts the scrollback too (65081 in a long
+        # session whose screen starts at line 65023); make it a screen line.
+        cur, first = c.cursor_coord, c.windowed_coord_range.coordRange.start.y
+        return prompt_state("\n".join(lines), cursor=(cur.x, cur.y - first))
 
     async def send_prompt(self, sid, text):
         """Type one line into an idle Claude Code prompt and submit it.
