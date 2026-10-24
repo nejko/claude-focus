@@ -162,6 +162,12 @@ def cmd_pending(argv):
             ap.error(f"--until: cannot read a future time from {a.until!r}")
         until_ms = int(when.timestamp() * 1000)
     every = max(1, a.every)
+    if a.check and pend.try_check(a.check, sess.get("cwd")) == 0:
+        sys.exit("claude-focus pending: the check succeeds already now (exit 0), so this wait would wake "
+                 "you at once. No wait is set. If the event has happened, continue now. If the check "
+                 "tests a state that stays true (a count since a fixed date, mail or alerts not yet "
+                 "marked as read), make it succeed only on something new, for example compare with a "
+                 "count or time that you save now, and set the wait again.")
     needs, why = a.needs, None
     if not needs:  # the answer to the user's message must reach them
         why = pend.read_answer_reason(store.load_state(), sess,

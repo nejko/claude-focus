@@ -365,6 +365,10 @@ The wait starts when the turn that set it ends, also when background shells
 that the session started still run (`◌ shells`): its prompt takes the
 wake-up all the same.
 
+`pending --check` runs the check once when it is set. If it exits 0 already,
+no wait is set and the session hears why: such a wait would wake it as soon
+as its turn ends, and again after every turn that sets it.
+
 With `--needs`, the session shows under YOUR TO-DOS with that request until
 you press d, and the wait still wakes it.
 

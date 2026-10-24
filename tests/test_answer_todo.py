@@ -88,6 +88,33 @@ class PendingCommandTest(Base):
         self.assertEqual(self.todo(), (None, False))
 
 
+class CheckTriedTest(Base):
+    """A check is run once when the wait is set: one that already succeeds
+    would wake the session at once, after every turn (linkmcp, 2026-10-24)."""
+    def run_check(self, check):
+        sess = dict(SESS, cwd=tempfile.mkdtemp())
+        with mock.patch.object(pend, "own_session", return_value=sess), \
+                mock.patch.object(pend, "app_running", return_value=True), \
+                mock.patch.object(sessions_mod, "last_user_answer", return_value=None), \
+                contextlib.redirect_stdout(io.StringIO()):
+            cli.cmd_pending(["--check", check, "--note", "mail"])
+
+    def test_a_check_that_succeeds_now_sets_no_wait(self):
+        with self.assertRaises(SystemExit) as e:
+            self.run_check("test -d .")
+        self.assertIn("succeeds already now", str(e.exception.code))
+        self.assertNotIn("s1", store.load_state().get("pending", {}))
+
+    def test_a_check_that_fails_now_sets_the_wait(self):
+        self.run_check("test -f new-mail")
+        self.assertEqual(self.record()["check"], "test -f new-mail")
+
+    def test_a_slow_check_sets_the_wait_untried(self):
+        with mock.patch.object(pend, "TRY_TIMEOUT", 0.2):
+            self.run_check("sleep 2")
+        self.assertEqual(self.record()["check"], "sleep 2")
+
+
 class AnswerSeenTest(Base):
     def tick(self, user_in, status="idle"):
         app = appmod.App(None)

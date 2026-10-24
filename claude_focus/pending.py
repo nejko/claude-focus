@@ -109,6 +109,22 @@ def set_pending(sess, until_ms, check, every_min, note, needs="", needs_auto=Fal
     return record
 
 
+TRY_TIMEOUT = 30  # seconds for the one run of a check when it is set
+
+
+def try_check(check, cwd):
+    """The exit code of one run of the check now, or None when it takes longer
+    than TRY_TIMEOUT. A check that already succeeds would wake the session as
+    soon as its turn ends, and again after every turn it sets the wait in:
+    linkmcp's counted the calls since a fixed date (33 >= 5) and woke it at
+    once after each wake-up (2026-10-23 and 24)."""
+    try:
+        return subprocess.run(check, shell=True, cwd=cwd or os.path.expanduser("~"), timeout=TRY_TIMEOUT,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+    except (subprocess.TimeoutExpired, OSError):  # OSError: the folder is gone
+        return None
+
+
 def clear_pending(session_id):
     store.update_state(lambda st: st.setdefault("pending", {}).pop(session_id, None))
 
