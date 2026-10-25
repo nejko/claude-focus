@@ -61,9 +61,10 @@ class StatusLogTest(unittest.TestCase):
     def test_changes_starts_and_ends(self):
         a = {"key": "a", "name": "personal-domen", "status": "busy"}
         b = {"key": "b", "name": "linkmcp", "status": "shell"}
-        c = {"key": "c", "name": "goldmine", "status": "idle"}
+        c = {"key": "c", "name": "goldmine", "status": "idle", "pid": 7, "entrypoint": "cli", "cwd": "/w/goldmine"}
         self.assertEqual(self.lines([a, b], [dict(a, status="idle"), b, c]),
-                         ["status personal-domen: busy -> idle", "status goldmine: started, idle"])
+                         ["status personal-domen: busy -> idle",
+                          "status goldmine: started, idle (pid 7, cli, /w/goldmine)"])
         self.assertEqual(self.lines([a, b], [a]), ["status linkmcp: ended"])
 
     def test_nothing_on_the_first_poll(self):

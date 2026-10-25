@@ -100,7 +100,10 @@ def _pid_alive(pid):
 def log_status_changes(before, after):
     """One log line for each session whose status changed since the last poll,
     and for each that started or ended, so a row that stayed too long in one
-    place can be explained later. Nothing on the first poll (no list yet)."""
+    place can be explained later. Nothing on the first poll (no list yet).
+    A start names the pid, entrypoint and folder: sessions named data-xx came
+    and went in 1 to 3 s, up to 532 times an hour (2026-10-24), from no known
+    source."""
     if not before:
         return
     old = {s["key"]: s for s in before}
@@ -108,7 +111,8 @@ def log_status_changes(before, after):
     for key, s in new.items():
         was = old.get(key)
         if was is None:
-            store.log(f"status {s.get('name')}: started, {s['status']}")
+            store.log(f"status {s.get('name')}: started, {s['status']} "
+                      f"(pid {s.get('pid')}, {s.get('entrypoint')}, {s.get('cwd')})")
         elif was["status"] != s["status"]:
             store.log(f"status {s.get('name')}: {was['status']} -> {s['status']}")
     for key in old.keys() - new.keys():
