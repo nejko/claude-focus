@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from unittest import mock
@@ -146,6 +147,26 @@ class ListSessionsTest(unittest.TestCase):
         with mock.patch.object(sessions, "_from_files", return_value=rows):
             live = sessions.list_sessions()
         self.assertEqual([r["sessionId"] for r in live], ["a", "d"])
+
+
+class FromFilesTest(unittest.TestCase):
+    def files(self, *rows):
+        d = tempfile.mkdtemp()
+        for i, r in enumerate(rows):
+            with open(f"{d}/{i}.json", "w") as f:
+                json.dump(dict(r, pid=os.getpid()), f)
+        with mock.patch.object(sessions, "SESSIONS_DIR", d):
+            return sessions._from_files()
+
+    def test_a_starting_session_is_skipped(self):
+        # A headless run's first write, before its status: the poll stays on
+        # the files instead of the CLI, which shows headless runs.
+        rows = self.files({"sessionId": "a", "status": "shell", "entrypoint": "cli"},
+                          {"sessionId": "b", "entrypoint": "sdk-cli"})
+        self.assertEqual([r["sessionId"] for r in rows], ["a"])
+
+    def test_a_format_without_status_is_unfamiliar(self):
+        self.assertIsNone(self.files({"sessionId": "a", "state": "busy"}))
 
 
 if __name__ == "__main__":

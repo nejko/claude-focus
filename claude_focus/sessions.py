@@ -24,12 +24,18 @@ SESSIONS_DIR = os.path.join(HOME, ".claude", "sessions")
 def _from_files():
     """Read ~/.claude/sessions/<pid>.json directly: the same data as
     `claude agents --json` for a fraction of the CPU (that command costs
-    about 0.3 s CPU per call). Returns None if the format looks unfamiliar."""
+    about 0.3 s CPU per call). Returns None if the format looks unfamiliar.
+
+    A starting session's first write has no status yet (for about 0.1 s,
+    2026-10-27), so such a file is skipped; only a format with a status in
+    no file is unfamiliar. Returning None there sent the poll to the CLI,
+    which names no entrypoint: headless runs showed as rows like data-xx for
+    1 to 3 s, and every shell session turned busy for those seconds."""
     try:
         names = [n for n in os.listdir(SESSIONS_DIR) if n.endswith(".json")]
     except OSError:
         return None
-    rows = []
+    rows, starting = [], 0
     for n in names:
         try:
             with open(os.path.join(SESSIONS_DIR, n)) as f:
@@ -38,9 +44,10 @@ def _from_files():
         except (OSError, ValueError, KeyError, TypeError):
             continue  # stale file of an exited process, or a partial write
         if "status" not in d or "sessionId" not in d:
-            return None
+            starting += 1
+            continue
         rows.append(d)
-    return rows
+    return None if starting and not rows else rows
 
 
 def _from_cli():
