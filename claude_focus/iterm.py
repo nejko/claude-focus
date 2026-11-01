@@ -2,6 +2,7 @@
 screen, bring it to the front with its pane maximized, and catch hotkeys.
 herdr.py has the same methods for herdr."""
 import asyncio
+import ctypes
 import json
 import os
 import re
@@ -13,6 +14,28 @@ from . import store
 from .screen import EMPTY, clean, prompt_state
 
 MAXIMIZE = iterm2.MainMenu.View.MAXIMIZE_ACTIVE_PANE.value.identifier
+
+# proc_pidinfo(PROC_PIDVNODEPATHINFO) fills a struct proc_vnodepathinfo: the
+# current folder first, as a 152-byte struct vnode_info and a 1024-byte path.
+PROC_PIDVNODEPATHINFO, VNODE_INFO, MAXPATHLEN = 9, 152, 1024
+_libproc = None
+
+
+def proc_cwd(pid):
+    """The working folder of a process, from the kernel, or None. iTerm2's
+    path variable can stay behind: after Claude Code ended in a pane and the
+    user typed cd in its shell, it still named the project (2026-11-01)."""
+    global _libproc
+    try:
+        if _libproc is None:
+            _libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
+        size = 2 * (VNODE_INFO + MAXPATHLEN)
+        buf = ctypes.create_string_buffer(size)
+        if _libproc.proc_pidinfo(int(pid), PROC_PIDVNODEPATHINFO, ctypes.c_uint64(0), buf, size) != size:
+            return None  # the process ended, or is not ours
+    except (OSError, TypeError, ValueError):
+        return None
+    return buf.raw[VNODE_INFO:VNODE_INFO + MAXPATHLEN].split(b"\0", 1)[0].decode(errors="replace") or None
 
 
 def own_pane():
@@ -139,8 +162,9 @@ class Bridge:
         of the last pane_map(), oldest pane (lowest tty) first. One request per
         pane, all at once: about 2 ms for 24 panes. The profile is the one the
         pane shows now (after a "Change profile" key), which the profile
-        object of the API does not say."""
-        names = ["profileName", "path", "jobName"]
+        object of the API does not say. The folder is the foreground
+        process's own (proc_cwd), iTerm2's path only when that fails."""
+        names = ["profileName", "path", "jobName", "jobPid"]
         panes = self.known_panes()
         replies = await asyncio.gather(*[iterm2.rpc.async_variable(self.conn, sid, [], names)
                                          for sid, _, _ in panes], return_exceptions=True)
@@ -151,7 +175,8 @@ class Bridge:
             except (AttributeError, TypeError, ValueError):
                 continue  # the pane closed while we asked
             if len(values) == len(names):
-                out.append((sid, tty, *values))
+                profile, path, job, job_pid = values
+                out.append((sid, tty, profile, proc_cwd(job_pid) or path, job))
         out.sort(key=lambda p: int(re.sub(r"\D", "", p[1]) or 0))
         return out
 
