@@ -11,7 +11,7 @@ import subprocess
 import iterm2
 
 from . import store
-from .screen import EMPTY, clean, prompt_state
+from .screen import EMPTY, clean, prompt_state, without_suggestion
 
 MAXIMIZE = iterm2.MainMenu.View.MAXIMIZE_ACTIVE_PANE.value.identifier
 
@@ -204,6 +204,8 @@ class Bridge:
         except Exception:
             return ""
         lines = [clean(contents.line(i).string) for i in range(contents.number_of_lines)]
+        cur, first = contents.cursor_coord, contents.windowed_coord_range.coordRange.start.y
+        lines = without_suggestion("\n".join(lines), cursor=(cur.x, cur.y - first)).split("\n")
         while lines and not lines[-1]:
             lines.pop()
         return "\n".join(lines[-max_lines:])

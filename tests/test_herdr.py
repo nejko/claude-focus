@@ -168,6 +168,8 @@ class BridgeTest(unittest.TestCase):
         self.fake.screens["w1:p1"] = TYPED
         self.assertEqual(self.run_bridge(lambda b: b.prompt_state("w1:p1")), DRAFT)
         self.assertIn("hello draft", self.run_bridge(lambda b: b.screen_text("w1:p1")))
+        self.fake.screens["w1:p1"] = SUGGESTION
+        self.assertNotIn("fix typecheck", self.run_bridge(lambda b: b.screen_text("w1:p1")))
 
     def test_go_focuses_and_zooms(self):
         self.assertTrue(self.run_bridge(lambda b: b.go("w2:p1")))

@@ -87,3 +87,17 @@ def prompt_state(text, cursor=None, ansi=None):
         if top + 1 < len(styled) and _dim_after_prompt(styled[top + 1]):
             return EMPTY
     return DRAFT
+
+
+def without_suggestion(text, cursor=None, ansi=None):
+    """`text` without Claude Code's grey suggestion in an empty input box
+    (prompt_state tells it from a draft). The scorers read the screen: with
+    "❯ odprl sem chrome s sellestial profilom" on it, the ask line left out
+    the request that this guess answered, as if the user had typed it
+    (ultima-rebuild on 2026-11-02)."""
+    if prompt_state(text, cursor, ansi) != EMPTY:
+        return text
+    lines = text.splitlines()
+    i = [n for n, x in enumerate(lines) if _is_rule(clean(x))][-2] + 1
+    lines[i] = lines[i][:lines[i].index("❯") + 1]
+    return "\n".join(lines)

@@ -14,7 +14,7 @@ import subprocess
 import time
 
 from . import store
-from .screen import EMPTY, OTHER, clean, prompt_state, strip_ansi
+from .screen import EMPTY, OTHER, clean, prompt_state, strip_ansi, without_suggestion
 from .terminal import SHELLS
 
 PROTOCOL = 22             # the API version this was written for (herdr 0.9.5)
@@ -271,10 +271,12 @@ class Bridge:
 
     async def screen_text(self, pane, max_lines=45):
         try:
-            read = (await self.call("pane.read", {"pane_id": pane, "source": "visible"}))["read"]
+            read = (await self.call("pane.read", {"pane_id": pane, "source": "visible", "format": "ansi",
+                                                  "strip_ansi": False}))["read"]
         except (Error, KeyError):
             return ""
-        lines = [clean(x) for x in read["text"].splitlines()]
+        text = without_suggestion(strip_ansi(read["text"]), ansi=read["text"])
+        lines = [clean(x) for x in text.splitlines()]
         while lines and not lines[-1]:
             lines.pop()
         return "\n".join(lines[-max_lines:])

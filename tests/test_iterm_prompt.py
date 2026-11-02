@@ -37,5 +37,22 @@ class PromptStateTest(unittest.TestCase):
         self.assertEqual(self.state((18, 3)), DRAFT)
 
 
+class ScreenTextTest(unittest.TestCase):
+    """The scorers read the screen without the suggestion: as text, it looks
+    like the user's reply already typed."""
+    def text(self, cursor):
+        bridge = iterm.Bridge(None)
+        bridge.session = lambda sid: pane(cursor)
+        return asyncio.run(bridge.screen_text("p1"))
+
+    def test_the_suggestion_is_left_out(self):
+        lines = self.text((2, 3)).splitlines()
+        self.assertEqual(lines[3], "❯")
+        self.assertEqual(lines[:3] + lines[4:], SCREEN[:3] + SCREEN[4:])
+
+    def test_a_draft_stays(self):
+        self.assertIn("❯ kaj je naslednje", self.text((18, 3)))
+
+
 if __name__ == "__main__":
     unittest.main()
