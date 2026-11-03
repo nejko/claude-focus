@@ -1,6 +1,7 @@
 """The poll starts as soon as a session's status changes: kqueue on each
 session file (Claude Code writes them in place), and the engine logs each
 status change. jev scores a status after 4 s, the Claude scorer after 15 s."""
+import asyncio
 import json
 import os
 import queue
@@ -67,8 +68,38 @@ class StatusLogTest(unittest.TestCase):
                           "status goldmine: started, idle (pid 7, cli, /w/goldmine)"])
         self.assertEqual(self.lines([a, b], [a]), ["status linkmcp: ended"])
 
+    def test_a_change_names_its_lag(self):
+        a = {"key": "a", "name": "x", "status": "waiting"}
+        b = dict(a, status="busy", statusSince=time.time() * 1000 - 400)
+        [line] = self.lines([a], [b])
+        self.assertRegex(line, r"^status x: waiting -> busy \(\+0\.4\d s\)$")
+
     def test_nothing_on_the_first_poll(self):
         self.assertEqual(self.lines([], [{"key": "a", "name": "x", "status": "idle"}]), [])
+
+
+class PollLoopTest(unittest.TestCase):
+    def test_a_change_during_a_poll_polls_again_at_once(self):
+        # The answer's status was written while a poll ran; it waited for
+        # poll_seconds (3.5 s on 2026-11-03) instead of EVENT_PAUSE.
+        app = appmod.App(None)
+        app.cfg = dict(app.cfg, poll_seconds=3)
+        times = []
+
+        async def poll():
+            times.append(time.monotonic())
+            if len(times) == 1:
+                app.poll_now.set()  # the file event, from the watch thread
+
+        async def run():
+            app.poll = poll
+            try:
+                await asyncio.wait_for(app.poll_loop(), timeout=1)
+            except asyncio.TimeoutError:
+                pass
+        asyncio.run(run())
+        self.assertGreaterEqual(len(times), 2)
+        self.assertLess(times[1] - times[0], appmod.EVENT_PAUSE + 0.2)
 
 
 class StableTest(unittest.TestCase):

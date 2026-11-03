@@ -114,7 +114,9 @@ def log_status_changes(before, after):
             store.log(f"status {s.get('name')}: started, {s['status']} "
                       f"(pid {s.get('pid')}, {s.get('entrypoint')}, {s.get('cwd')})")
         elif was["status"] != s["status"]:
-            store.log(f"status {s.get('name')}: {was['status']} -> {s['status']}")
+            # How long after Claude Code's own time of the change the poll saw it
+            lag = f" (+{time.time() - s['statusSince'] / 1000:.2f} s)" if s.get("statusSince") else ""
+            store.log(f"status {s.get('name')}: {was['status']} -> {s['status']}{lag}")
     for key in old.keys() - new.keys():
         store.log(f"status {old[key].get('name')}: ended")
 
@@ -1386,12 +1388,15 @@ class App:
 
     async def poll_loop(self):
         while True:
+            # Cleared before the poll, so a change during it polls again at
+            # once. Cleared after it, such a change waited for poll_seconds:
+            # an answer's busy status came 3.5 s late on 2026-11-03.
+            self.poll_now.clear()
             try:
                 await self.poll()
             except Exception as ex:  # keep the screen alive; details in the log
                 store.log(f"poll error: {ex!r}")
             self.wake.set()
-            self.poll_now.clear()
             try:
                 await asyncio.wait_for(self.poll_now.wait(), timeout=self.cfg["poll_seconds"])
                 await asyncio.sleep(EVENT_PAUSE)
