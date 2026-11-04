@@ -83,7 +83,7 @@ terminal it uses, and whether it was detected or set in the config.
   [herdr](https://herdr.dev/) (tested with 0.9.5, API protocol 22).
 - Python 3.10 or newer.
 - [Claude Code](https://claude.com/claude-code) (tested with 2.1.29x to
-  2.1.306). claude-focus reads Claude Code's own session files, which are
+  2.1.311). claude-focus reads Claude Code's own session files, which are
   not a public API, so a Claude Code update can break it.
 
 This is an early release. It runs every day on one Mac with about 20
