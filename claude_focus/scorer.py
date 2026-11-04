@@ -191,8 +191,13 @@ async def _claude(prompt, system, schema, model, name):
         out, err = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout=180)
         data = json.loads(out.decode() or "{}")
         if data.get("is_error") or not isinstance(data.get("structured_output"), dict):
-            store.log(f"{model} failed {name}: {out.decode()[:300]} {err.decode()[:300]}")
-            last_error = f"claude: {(err.decode() or out.decode()).strip()[:160]}"
+            # Claude Code's own message is in "result", e.g. "You've hit your
+            # weekly limit · resets 3pm" (2026-11-04). The focus window showed
+            # the first 160 characters of the raw JSON instead, without it.
+            why = data.get("result") if isinstance(data.get("result"), str) else ""
+            why = why.strip() or (err.decode() or out.decode()).strip()
+            store.log(f"{model} failed {name}: {why[:300]}")
+            last_error = f"{model}: {why[:160]}"
             return None
         last_error = None
         return data

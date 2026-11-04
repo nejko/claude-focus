@@ -1,5 +1,8 @@
+import asyncio
 import datetime as dt
+import json
 import unittest
+from unittest import mock
 
 import _env  # noqa: E402,F401  (first: a scratch CLAUDE_FOCUS_DIR)
 
@@ -211,3 +214,21 @@ class StateTextTest(unittest.TestCase):
         self.assertTrue(scorer.state_text(shell).startswith("shell (its turn has ended, but background shells"))
         prompt = scorer.build_prompt(shell, "", "", dt.datetime(2026, 10, 22, 11, 0))
         self.assertIn("STATE: shell (its turn has ended", prompt)
+
+
+class ClaudeErrorTest(unittest.TestCase):
+    """A failed headless call shows Claude Code's own message, not raw JSON."""
+    def run_call(self, out, err=b""):
+        proc = mock.Mock(communicate=mock.AsyncMock(return_value=(out, err)))
+        with mock.patch.object(scorer.asyncio, "create_subprocess_exec", mock.AsyncMock(return_value=proc)):
+            return asyncio.run(scorer._claude("prompt", "system", {}, "claude-haiku-5-5", "s"))
+
+    def test_the_weekly_limit(self):
+        out = json.dumps({"duration_api_ms": 0, "stop_reason": "stop_sequence", "total_cost_usd": 0,
+                          "is_error": True, "result": "You've hit your weekly limit · resets 3pm"}).encode()
+        self.assertIsNone(self.run_call(out))
+        self.assertEqual(scorer.last_error, "claude-haiku-5-5: You've hit your weekly limit · resets 3pm")
+
+    def test_no_result_text(self):
+        self.assertIsNone(self.run_call(b"", b"claude: command crashed"))
+        self.assertEqual(scorer.last_error, "claude-haiku-5-5: claude: command crashed")
