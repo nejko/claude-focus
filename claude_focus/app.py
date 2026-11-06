@@ -30,6 +30,10 @@ TUI_FILE = restore.TUI_FILE
 BIN = shutil.which("claude-focus") or os.path.join(  # installed, else run from the checkout
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "claude-focus")
 RESCORE_AFTER_H = 12      # rescore a waiting session twice a day
+# After a failed score, wait this long before that session is scored again.
+# Without it every poll retried: 1,377 failed jev calls in one hour while the
+# Mac had no DNS (2026-11-06, 22:40 to 22:47).
+SCORE_RETRY_S = 30
 CHECK_TIMEOUT = 120       # seconds for one pending check command
 SNAPSHOT_SECONDS = 10     # how often the engine saves the layout for a restore
 ANSWER_POLL = 0.4         # seconds between two looks at a dialog the user went to answer
@@ -150,6 +154,7 @@ class App:
         self.sessions = []
         self.view = None
         self.scoring = set()      # state keys being scored now
+        self.score_failed = {}    # state key -> time of its last failed score (SCORE_RETRY_S)
         self.checking = set()     # session ids whose pending check runs now
         self.sem = asyncio.Semaphore(self.cfg["scorer_parallel"])
         self.mode = "main"        # main | snooze | snooze_time | priority | restore | folders
@@ -330,6 +335,8 @@ class App:
                 continue
             if self._user_in(s):
                 continue  # the user is in this session now; score it when they leave
+            if time.time() - self.score_failed.get(key, 0) < SCORE_RETRY_S:
+                continue
             if now_ms - s["statusSince"] < STABLE_SECONDS.get(self.cfg["scorer"], 15) * 1000:
                 continue
             sc = q.fresh_score(state["sessions"].get(key, {}), s["statusSince"])
@@ -352,6 +359,10 @@ class App:
                 last = await asyncio.get_event_loop().run_in_executor(
                     None, sessions_mod.last_assistant_text, s["cwd"], s["sessionId"])
                 result = await scorer.score(s, screen, last, self.cfg)
+            if result is None:
+                self.score_failed[key] = time.time()
+            else:
+                self.score_failed.pop(key, None)
             if result:
                 store.update_state(lambda st: st["sessions"].setdefault(key, {}).__setitem__("score", result))
                 line = f" + {result['ask_model']} ${result['ask_cost_usd']:.4f}" if "ask_model" in result else ""

@@ -102,6 +102,32 @@ class PollLoopTest(unittest.TestCase):
         self.assertLess(times[1] - times[0], appmod.EVENT_PAUSE + 0.2)
 
 
+class ScoreRetryTest(unittest.TestCase):
+    """A failed score is not retried on every poll (no DNS on 2026-11-06:
+    1,377 failed jev calls in an hour)."""
+    def setUp(self):
+        self.app = appmod.App(None)
+        self.app.cfg = dict(self.app.cfg, scorer="jev")
+        self.app.bridge = mock.Mock(pane_of=lambda s: None, user_pane=lambda: None)
+        self.app.sessions = [{"key": "a", "sessionId": "a", "name": "x", "status": "idle", "pid": 1,
+                              "cwd": "/x", "statusSince": time.time() * 1000 - 60000}]
+
+    def scheduled(self):
+        with mock.patch.object(appmod.asyncio, "ensure_future") as fut, \
+                mock.patch.object(self.app, "_score", mock.Mock()):
+            self.app._schedule_scores({"sessions": {}, "pending": {}})
+        self.app.scoring.clear()
+        return fut.called
+
+    def test_a_failed_score_waits(self):
+        with mock.patch.object(appmod.scorer, "score", mock.AsyncMock(return_value=None)), \
+                mock.patch.object(appmod.sessions_mod, "last_assistant_text", return_value=""):
+            asyncio.run(self.app._score(self.app.sessions[0]))
+        self.assertFalse(self.scheduled())
+        self.app.score_failed["a"] -= appmod.SCORE_RETRY_S + 1
+        self.assertTrue(self.scheduled())
+
+
 class StableTest(unittest.TestCase):
     def scheduled(self, scorer, idle_s):
         app = appmod.App(None)
