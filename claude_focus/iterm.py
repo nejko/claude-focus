@@ -38,6 +38,17 @@ def proc_cwd(pid):
     return buf.raw[VNODE_INFO:VNODE_INFO + MAXPATHLEN].split(b"\0", 1)[0].decode(errors="replace") or None
 
 
+async def with_session_profile(create, **kwargs):
+    """create(profile=..., **kwargs) with the session profile (config
+    session_profile), else with iTerm2's default. The default can be the green
+    free profile, so that every Cmd+N window is a free terminal (2026-11-07);
+    the focus screen and restored sessions are no free terminals."""
+    try:
+        return await create(profile=store.load_config()["session_profile"], **kwargs)
+    except Exception:  # no profile of that name
+        return await create(**kwargs)
+
+
 def own_pane():
     """The iTerm2 session id of the pane this process runs in ("" outside iTerm2)."""
     return os.environ.get("ITERM_SESSION_ID", "").split(":")[-1]
@@ -248,7 +259,7 @@ class Bridge:
 
     async def open_window(self, command):
         """A new iTerm2 window running command."""
-        await iterm2.Window.async_create(self.conn, command=command)
+        await with_session_profile(lambda **k: iterm2.Window.async_create(self.conn, **k), command=command)
         return True
 
     async def _maximized(self):

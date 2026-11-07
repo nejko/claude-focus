@@ -40,5 +40,21 @@ class FolderTest(unittest.TestCase):
         self.assertEqual(info, [("s1", "ttys015", "Available", self.home, "zsh")])
 
 
+class SessionProfileTest(unittest.TestCase):
+    """claude-focus opens its windows with the session profile: iTerm2's
+    default can be the green free profile (Cmd+N windows free, 2026-11-07)."""
+    def test_the_session_profile(self):
+        create = mock.AsyncMock(return_value="window")
+        with mock.patch.object(iterm.store, "load_config", return_value={"session_profile": "Default"}):
+            self.assertEqual(asyncio.run(iterm.with_session_profile(create, command="x")), "window")
+        create.assert_awaited_once_with(profile="Default", command="x")
+
+    def test_no_such_profile(self):
+        create = mock.AsyncMock(side_effect=[iterm.iterm2.CreateWindowException("INVALID_PROFILE_NAME"), "window"])
+        with mock.patch.object(iterm.store, "load_config", return_value={"session_profile": "Gone"}):
+            self.assertEqual(asyncio.run(iterm.with_session_profile(create)), "window")
+        self.assertEqual(create.await_args_list[-1], mock.call())
+
+
 if __name__ == "__main__":
     unittest.main()

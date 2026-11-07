@@ -377,6 +377,8 @@ async def run(conn, windows, say):
     say(text) reports progress; every step also goes to the log."""
     import iterm2
 
+    from .iterm import with_session_profile
+
     def note(text):
         store.log("restore: " + text)
         say(text)
@@ -385,7 +387,7 @@ async def run(conn, windows, say):
     await iterm2.async_get_app(conn)
     waits = []
     for w in windows:
-        win = await iterm2.Window.async_create(conn)
+        win = await with_session_profile(lambda **k: iterm2.Window.async_create(conn, **k))
         if win is None or not (win.current_tab or win.tabs):
             note("iTerm2 did not open a window")
             continue
@@ -394,7 +396,7 @@ async def run(conn, windows, say):
         except Exception as ex:  # a window in the wrong place is still useful
             store.log(f"restore: window not placed: {ex!r}")
         for n, p in enumerate(w["panes"]):
-            tab = (win.current_tab or win.tabs[0]) if n == 0 else await win.async_create_tab()
+            tab = (win.current_tab or win.tabs[0]) if n == 0 else await with_session_profile(win.async_create_tab)
             session = tab.current_session or tab.sessions[0]
             await _wait_for_shell(session)
             await session.async_send_text(shell_line(p) + "\r")

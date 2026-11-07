@@ -502,6 +502,12 @@ You can also mark a pane free by hand: bind a key to "Change Profile" >
 Available in iTerm2's key bindings. Config `free_profile` names another
 profile.
 
+A new window (Cmd+N) gets iTerm2's default profile, so it is not free. To
+make every new window a free terminal, make `Available` the default profile
+(Settings > Profiles > Available > Other Actions > Set as Default). The
+windows that claude-focus opens itself, the focus screen and the panes of a
+restore, get `session_profile` instead.
+
 This is the only part of claude-focus that uses iTerm2 profiles; the colors
 of the focus screen need no setup. Without the profile, the section stays
 empty, and a switch to a profile that does not exist changes nothing. The
