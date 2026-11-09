@@ -12,7 +12,7 @@ import time
 
 from . import store, system
 
-SESSIONS_DIR = os.path.expanduser("~/.claude/sessions")
+SESSIONS_DIR = os.path.normpath(os.path.expanduser("~/.claude/sessions"))
 ENGINE_LOCK = os.path.join(store.DIR, "engine.lock")
 
 

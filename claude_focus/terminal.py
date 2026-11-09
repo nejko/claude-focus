@@ -26,6 +26,18 @@ def _ps_quote(path):
     return "'" + path.replace("'", "''") + "'"
 
 
+def command_line(job, argv):
+    """argv as a line for the shell `job` to run: `& 'C:\\x y\\a.exe' b` in
+    PowerShell (a quoted path alone is only a string there), cmd.exe's
+    quoting in cmd.exe, else POSIX quoting."""
+    shell = shell_name(job)
+    if shell in POWERSHELL:
+        return "& " + " ".join(_ps_quote(a) for a in argv)
+    if shell == "cmd":
+        return subprocess.list2cmdline(argv)
+    return " ".join(shlex.quote(a) for a in argv)
+
+
 def start_command(job, path, command, create=False):
     """The line to type into a pane at a bare shell (its program `job`) that
     starts `command` in the folder `path`; with create, it makes the folder

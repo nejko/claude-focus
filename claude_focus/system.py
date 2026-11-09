@@ -114,6 +114,15 @@ def processes():
     return out
 
 
+def children(pid):
+    """[{"pid", "name"}] of the direct child processes of pid (Windows: psutil)."""
+    import psutil
+    try:
+        return [{"pid": c.pid, "name": c.name()} for c in psutil.Process(int(pid)).children()]
+    except (psutil.Error, ValueError, TypeError):
+        return []
+
+
 def parent_pid(pid):
     """The parent process of pid, or 0."""
     if WINDOWS:

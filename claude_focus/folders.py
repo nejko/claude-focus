@@ -8,8 +8,8 @@ import os
 import re
 import stat
 
-CLAUDE_JSON = os.path.expanduser("~/.claude.json")
-TRANSCRIPTS = os.path.expanduser("~/.claude/projects")
+CLAUDE_JSON = os.path.normpath(os.path.expanduser("~/.claude.json"))
+TRANSCRIPTS = os.path.normpath(os.path.expanduser("~/.claude/projects"))
 TEMP = ("/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/")
 
 

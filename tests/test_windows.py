@@ -97,6 +97,16 @@ class ShellTest(unittest.TestCase):
         self.assertIsNone(terminal.start_command("vim", "/x", "claude"))
 
 
+class CommandLineTest(unittest.TestCase):
+    def test_a_path_with_a_space_in_each_shell(self):
+        argv = [r"C:\Users\Ana Žagar\.local\bin\claude-focus.exe", "attach", "j1"]
+        self.assertEqual(terminal.command_line("powershell.exe", argv),
+                         "& 'C:\\Users\\Ana Žagar\\.local\\bin\\claude-focus.exe' 'attach' 'j1'")
+        self.assertEqual(terminal.command_line("cmd.exe", argv),
+                         '"C:\\Users\\Ana Žagar\\.local\\bin\\claude-focus.exe" attach j1')
+        self.assertEqual(terminal.command_line("zsh", ["/Users/a b/cf", "go"]), "'/Users/a b/cf' go")
+
+
 class KeysTest(unittest.TestCase):
     def read(self, keys):
         it = iter(keys)
@@ -144,7 +154,8 @@ class PathsTest(unittest.TestCase):
     def test_the_hook_is_found_in_either_form(self):
         from claude_focus import setup as su
         for command in ("/opt/homebrew/bin/claude-focus hook prompt-submit",
-                        '"C:/Users/ana/.local/bin/claude-focus.exe" hook prompt-submit'):
+                        '"C:/Users/ana/.local/bin/claude-focus.exe" hook prompt-submit',
+                        '"C:/Users/ana/.local/bin/claude-focus.EXE" hook prompt-submit'):  # shutil.which's case
             settings = {}
             self.assertFalse(su.add_hook({"hooks": {"UserPromptSubmit": [
                 {"hooks": [{"type": "command", "command": command}]}]}}, "x"))
@@ -175,6 +186,27 @@ class FrontTest(unittest.TestCase):
                  200: (1, "claude.exe", [])}
         with mock.patch.object(system, "WINDOWS", True), mock.patch.object(system, "processes", return_value=procs):
             self.assertEqual(terminal.where_sessions_run([100, 200]), {terminal.HERDR: 1, terminal.ITERM: 0})
+
+
+class BusyShellTest(unittest.TestCase):
+    """herdr on Windows names only the shell of a pane that runs a program
+    that is no agent: the shell's children tell that pane from a free one."""
+
+    def test_a_shell_with_a_child_is_busy(self):
+        shell = [{"pid": 10, "name": "powershell.exe"}]
+        kids = {10: [{"pid": 11, "name": "claude-focus.exe"}]}
+        procs = herdr.with_children(shell, 10, lambda pid: kids.get(pid, []))
+        self.assertEqual(procs, kids[10])
+        self.assertFalse(herdr.Bridge.is_free(None, procs[0]["name"], {}))
+        self.assertEqual(herdr.with_children(shell, 10, lambda pid: []), shell)  # a bare shell: free
+        claude = [{"pid": 12, "name": "claude.exe"}]
+        self.assertEqual(herdr.with_children(claude, 10, lambda pid: 1 / 0), claude)  # an agent: as herdr says
+
+    @unittest.skipUnless(WINDOWS, "psutil: Windows only")
+    def test_children_of_this_process(self):
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(proc.kill)
+        self.assertIn(proc.pid, [c["pid"] for c in system.children(os.getpid())])
 
 
 class ShellArgvTest(unittest.TestCase):

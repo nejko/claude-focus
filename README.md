@@ -78,7 +78,7 @@ terminal it uses, and whether it was detected or set in the config.
 
 ## Requirements
 
-- macOS.
+- macOS, or Windows 11 with herdr (see "Windows").
 - [iTerm2](https://iterm2.com) with its Python API on, or
   [herdr](https://herdr.dev/) (tested with 0.9.5, API protocol 22).
 - Python 3.10 or newer.
@@ -93,7 +93,7 @@ sessions; expect rough edges elsewhere, and please open an issue.
 
 In iTerm2, first turn on its Python API (Settings > General > Magic >
 Enable Python API), then run these two commands in iTerm2. In herdr, run
-them in one of its panes:
+them in one of its panes. On Windows, see "Windows" below.
 
 ```sh
 brew install nejko/tap/claude-focus
@@ -607,6 +607,80 @@ config when set, else the server of the pane it runs in
 (`~/.config/herdr/herdr.sock`). Sessions in another herdr session or on a
 remote machine show without a pane.
 
+## Windows
+
+claude-focus runs on Windows 11 with herdr and Claude Code's native Windows
+build. It was tested on Windows 11 Pro 25H2 with herdr 0.9.5, Claude Code
+2.1.319 and Windows PowerShell 5.1 panes in Windows Terminal. The iTerm2
+parts (the green profile, crash recovery, `reboot`, global hotkeys) do not
+exist there.
+
+**Install.** You need [Git for Windows](https://git-scm.com/download/win)
+(Claude Code's Bash tool and your check commands run in Git Bash),
+[uv](https://docs.astral.sh/uv/), Claude Code and herdr. Then, in a herdr
+pane:
+
+```powershell
+uv tool install claude-focus
+claude-focus setup
+```
+
+uv puts `claude-focus.exe` into `%USERPROFILE%\.local\bin`, the folder
+where the Claude Code installer puts `claude.exe`. The Claude Code
+installer does not add that folder to your PATH: if a new terminal finds
+neither `claude` nor `claude-focus`, run `uv tool update-shell` and open a
+new terminal.
+
+Start herdr from an ordinary terminal, not one opened as administrator. An
+elevated herdr server refuses clients that are not elevated, and the
+background service is not.
+
+**How it differs from macOS.**
+
+- herdr's API is a named pipe, `\\.\pipe\` followed by the socket path
+  `%APPDATA%\herdr\herdr.sock`. herdr's config, with the two claude-focus
+  keys, is `%APPDATA%\herdr\config.toml`.
+- The background service is a value in your Run key
+  (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; no admin rights
+  needed). At logon it starts a supervisor without a window
+  (`pythonw.exe`). The supervisor runs the engine and starts it again 30
+  seconds after it stops, as launchd does on macOS. `claude-focus status`
+  shows both processes; the log is `~\.claude-focus\service.log`.
+- The check commands of pending waits run in Git Bash, because Claude
+  writes them in bash.
+- The prompt hook in `~\.claude\settings.json` names claude-focus in quotes
+  with forward slashes. Claude Code runs hooks through Git Bash, which
+  drops backslashes.
+- A new session in a free terminal starts with the syntax of the pane's
+  shell: PowerShell, cmd.exe or bash.
+- The focus screen's light or dark look follows Windows' app mode
+  (Settings > Personalization > Colors).
+- There is no kqueue, so the engine finds changed session files by polling
+  every few seconds.
+
+**Upgrade.** Windows does not let uv replace a program that is running.
+Stop claude-focus first; an upgrade that fails halfway leaves the tool
+without its code, and `claude-focus` then fails with "No module named
+claude_focus".
+
+```powershell
+claude-focus uninstall-daemon
+# quit the focus screen (q), then:
+uv tool upgrade claude-focus
+claude-focus setup
+```
+
+After a failed upgrade, stop what is left and install again:
+
+```powershell
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'claude[-_]focus' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+uv tool install --force claude-focus
+claude-focus setup
+```
+
+Uninstall the same way: `claude-focus uninstall`, quit the focus screen,
+then `uv tool uninstall claude-focus`.
+
 ## Configuration
 
 `~/.claude-focus/config.json` overrides the defaults in
@@ -656,6 +730,7 @@ All under `~/.claude-focus/` (mode 700):
   always the whole previous iTerm2 run).
 - `engine.json`, `engine.lock`, `service.pid`, `service.log`: which process
   is the engine.
+- `supervisor.pid`, `supervisor.lock` (Windows): the service's supervisor.
 
 The jev keys live in `~/.config/claude-focus/credentials` (see "Scoring").
 
@@ -705,7 +780,11 @@ both write to one transcript.
 ```
 
 The tests use a scratch folder, never your `~/.claude-focus`. The herdr
-tests run against a fake herdr server on a scratch socket.
+tests run against a fake herdr server on a scratch socket, on Windows on a
+named pipe. On Windows, run them with `.venv\Scripts\python.exe -m unittest
+discover -s tests`; the tests of the iTerm2 bridge and of kqueue skip there,
+and `tests/test_windows.py` tests the Windows parts (most of them on macOS
+too).
 
 ## Releasing
 

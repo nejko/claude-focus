@@ -6,6 +6,7 @@ import ctypes
 import json
 import os
 import re
+import shlex
 import subprocess
 
 import iterm2
@@ -258,7 +259,9 @@ class Bridge:
         return True
 
     async def open_window(self, command):
-        """A new iTerm2 window running command."""
+        """A new iTerm2 window running command (a line, or an argv list)."""
+        if not isinstance(command, str):
+            command = " ".join(shlex.quote(a) for a in command)
         await with_session_profile(lambda **k: iterm2.Window.async_create(self.conn, **k), command=command)
         return True
 

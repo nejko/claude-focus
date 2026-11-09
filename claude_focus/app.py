@@ -180,6 +180,7 @@ class App:
     def __init__(self, bridge, headless=False, passive=False):
         self.headless = headless
         self.passive = passive
+        self._tasks = set()  # background tasks, kept until they end (_spawn)
         self.cfg = store.load_config()
         self.bridge = bridge
         self.sessions = []
@@ -281,7 +282,7 @@ class App:
             restore.prune(self.run_id)
         except OSError as ex:
             store.log(f"layouts not pruned: {ex!r}")
-        asyncio.ensure_future(self._guard("auto restore", self._auto_restore()))
+        self._spawn(self._guard("auto restore", self._auto_restore()))
 
     async def _auto_restore(self):
         """After a restart prepared with `claude-focus reboot`: open the saved
@@ -308,7 +309,7 @@ class App:
         `claude-focus show`)."""
         if self.headless or not self.cfg.get("hotkeys") or not self.bridge.hotkeys:
             return
-        asyncio.ensure_future(self._guard("hotkeys", self.bridge.watch_hotkeys({
+        self._spawn(self._guard("hotkeys", self.bridge.watch_hotkeys({
             self.cfg["hotkey_go"]: self.go_top,
             self.cfg["hotkey_focus_window"]: self.show_focus_window,
         })))
@@ -338,7 +339,7 @@ class App:
         for s in self.sessions:
             if s["key"] in keys and s["key"] not in self.scoring:
                 self.scoring.add(s["key"])
-                asyncio.ensure_future(self._score(s))
+                self._spawn(self._score(s))
 
     def scoring_now(self):
         return self.scoring if self.engine else set(self.remote.get("scoring", []))
@@ -377,7 +378,7 @@ class App:
         todo.sort(key=lambda s: s["statusSince"])
         for s in todo:
             self.scoring.add(s["key"])
-            asyncio.ensure_future(self._score(s))
+            self._spawn(self._score(s))
 
     async def _score(self, s):
         key = s["key"]
@@ -530,7 +531,7 @@ class App:
             elif (p.get("check") and sid not in self.checking
                   and now_ms - (p.get("last_check") or 0) >= p.get("every_min", 5) * 60000):
                 self.checking.add(sid)
-                asyncio.ensure_future(self.run_check(s, p))
+                self._spawn(self.run_check(s, p))
 
     def _note_seen(self):
         """Remember when the user's keys were last in each session's pane (state
@@ -696,7 +697,7 @@ class App:
             # A background session (/bg) has no pane: attach it in a new window (a new herdr tab).
             claude = shutil.which("claude") or "claude"
             self.sel = None
-            await self.bridge.open_window(f"{claude} attach {job}")
+            await self.bridge.open_window([claude, "attach", job])
             return
         if not pane:
             self.flash(f"{s.get('name')}: no {self.bridge.label} pane found")
@@ -707,7 +708,7 @@ class App:
             self.answer_watch = None
         before = await self._dialog_snapshot(s) if self.cfg["return_after_answer"] else None
         if await self.bridge.go(pane, zoom=self.cfg["zoom"]) and before:
-            self.answer_watch = asyncio.ensure_future(
+            self.answer_watch = self._spawn(
                 self._guard("answer watch", self._return_after_answer(s, pane, *before)))
 
     async def _dialog_snapshot(self, s):
@@ -903,7 +904,7 @@ class App:
             self.flash("Rescore requested.")
         elif key not in self.scoring:
             self.scoring.add(key)
-            asyncio.ensure_future(self._score(item["s"]))
+            self._spawn(self._score(item["s"]))
             self.flash("Rescoring...")
 
     def restore_plan(self):
@@ -984,7 +985,7 @@ class App:
                 self._restore_answered()
                 self.mode = "main"
                 if p:
-                    asyncio.ensure_future(self._guard("restore", restore.run(self.bridge.conn, p[0], self.flash)))
+                    self._spawn(self._guard("restore", restore.run(self.bridge.conn, p[0], self.flash)))
             elif key == "n":
                 self._restore_answered()
                 self.mode = "main"
@@ -1457,6 +1458,17 @@ class App:
             except asyncio.TimeoutError:
                 pass
 
+    def _spawn(self, coro):
+        """asyncio.ensure_future, with the task kept until it ends. The loop
+        keeps only weak references to tasks, and asyncio's stream protocol
+        only a weak one to its reader: a task that waits for herdr's events
+        could be collected while it waited ("Task was destroyed but it is
+        pending!", every engine start on Windows, 2026-11-09)."""
+        task = asyncio.ensure_future(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return task
+
     async def _guard(self, name, coro):
         try:
             await coro
@@ -1482,8 +1494,8 @@ class App:
             f.write(str(os.getpid()))
         await self.bridge.start()
         store.log(f"service connected to {self.bridge.label} (pid {os.getpid()})")
-        asyncio.ensure_future(self._guard("terminal watch", self._watch_terminal()))
-        asyncio.ensure_future(self._guard("events", self.bridge.watch_events(self.poll_now.set)))
+        self._spawn(self._guard("terminal watch", self._watch_terminal()))
+        self._spawn(self._guard("events", self.bridge.watch_events(self.poll_now.set)))
         self._start_watch()
         await self.poll_loop()
 
@@ -1504,8 +1516,8 @@ class App:
             json.dump({"pid": os.getpid(), "session": own}, f)
         await self.bridge.start()
         self.focused = await self.bridge.has_focus(own)
-        asyncio.ensure_future(self._guard("focus watch", self.bridge.watch_focus(own, self._set_focused)))
-        asyncio.ensure_future(self._guard("events", self.bridge.watch_events(self.poll_now.set)))
+        self._spawn(self._guard("focus watch", self.bridge.watch_focus(own, self._set_focused)))
+        self._spawn(self._guard("events", self.bridge.watch_events(self.poll_now.set)))
         self._start_watch((store.DIR,))  # the service writes the scores there
         loop = asyncio.get_event_loop()
         if self.bridge.restores:
@@ -1517,8 +1529,8 @@ class App:
         else:
             fd = sys.stdin.fileno()
             loop.add_reader(fd, lambda: keyq.put_nowait(os.read(fd, 64).decode("utf-8", "ignore")))
-        asyncio.ensure_future(self.poll_loop())
-        asyncio.ensure_future(self.render_loop())
+        self._spawn(self.poll_loop())
+        self._spawn(self.render_loop())
         self._start_hotkeys()
         while True:
             data = await keyq.get()
@@ -1533,7 +1545,7 @@ async def show_focus(bridge):
     """Bring the open focus screen to the front, or open one."""
     pane = restore.focus_pane()
     if not (pane and await bridge.go(pane, zoom=False)):
-        await bridge.open_window(BIN)
+        await bridge.open_window([BIN])
 
 
 def _windows_console():

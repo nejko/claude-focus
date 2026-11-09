@@ -12,7 +12,7 @@ import os
 from . import ask, scorer, store
 
 USD_PER_INPUT_TOKEN = 0.042 / 1_000_000
-CREDENTIALS = os.path.expanduser("~/.config/claude-focus/credentials")
+CREDENTIALS = os.path.normpath(os.path.expanduser("~/.config/claude-focus/credentials"))
 OPENROUTER = "https://openrouter.ai/api"  # the SDK appends /v1/systemone
 
 # Lowest to highest. The share of the top level decides how high a session

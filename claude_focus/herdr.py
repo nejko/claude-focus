@@ -19,7 +19,7 @@ import time
 
 from . import store, system
 from .screen import EMPTY, OTHER, clean, prompt_state, strip_ansi, without_suggestion
-from .terminal import shell_name
+from .terminal import command_line, shell_name
 
 PROTOCOL = 22             # the API version this was written for (herdr 0.9.5)
 
@@ -319,6 +319,8 @@ class Bridge:
                 info = {}  # the pane closed meanwhile
             info = info.get("process_info") or {}
             r["procs"], r["shell_pid"] = info.get("foreground_processes") or [], info.get("shell_pid")
+            if system.WINDOWS:
+                r["procs"] = with_children(r["procs"], r["shell_pid"], system.children)
         return rows
 
     async def refresh(self):
@@ -478,11 +480,13 @@ class Bridge:
         return theme
 
     async def open_window(self, command):
-        """A new tab in the workspace the user looks at, running command."""
+        """A new tab in the workspace the user looks at, running command (an
+        argv list, quoted for the tab's shell: PowerShell on Windows)."""
         try:
             made = await self.call("tab.create", {"focus": True, "cwd": os.path.expanduser("~")})
             pane = made["root_pane"]["pane_id"]
             end = time.time() + SHELL_WAIT
+            procs = []
             while time.time() < end:  # type once the shell runs: before that, its startup may eat the keys
                 info = (await self.call("pane.process_info", {"pane_id": pane}))["process_info"]
                 procs = info.get("foreground_processes") or []
@@ -490,6 +494,8 @@ class Bridge:
                     break
                 await asyncio.sleep(0.2)
             await asyncio.sleep(0.3)
+            if not isinstance(command, str):
+                command = command_line(procs[0]["name"] if procs else "", command)
             await self.call("pane.send_text", {"pane_id": pane, "text": command + "\r"})
             return True
         except (Error, KeyError) as ex:
@@ -576,6 +582,17 @@ class Bridge:
         except Error as ex:
             store.log(f"herdr: sidebar tokens for {pane} not sent: {ex}")
             return False
+
+
+def with_children(procs, shell_pid, children):
+    """A pane's foreground processes on Windows. herdr has no foreground
+    process group there: it names the agent it detected (claude.exe), else
+    only the shell, also while the shell runs a program (claude-focus
+    itself, npm, a script). Such a pane is no free terminal: its shell's
+    children stand in for the shell (measured with herdr 0.9.5, 2026-11-09)."""
+    if not shell_pid or any(p.get("pid") != shell_pid for p in procs):
+        return procs
+    return children(shell_pid) or procs
 
 
 def sidebar_tokens(section, priority, ask):

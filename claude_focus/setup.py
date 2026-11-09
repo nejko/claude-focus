@@ -32,7 +32,7 @@ import time
 
 from . import herdr, store, system, terminal
 
-CLAUDE_DIR = os.path.expanduser("~/.claude")
+CLAUDE_DIR = os.path.normpath(os.path.expanduser("~/.claude"))
 SETTINGS = os.path.join(CLAUDE_DIR, "settings.json")
 CLAUDE_MD = os.path.join(CLAUDE_DIR, "CLAUDE.md")
 PROFILES_DIR = os.path.expanduser("~/Library/Application Support/iTerm2/DynamicProfiles")
@@ -42,7 +42,7 @@ HERDR_CONFIG = os.path.expanduser(os.environ.get("HERDR_CONFIG_PATH") or os.path
 RULE_FILE = os.path.join(os.path.dirname(__file__), "claude_md_rule.md")
 HOOK_TAG = "claude-focus hook prompt-submit"
 # Also `"C:/Users/ana/.local/bin/claude-focus.exe" hook prompt-submit` (Windows)
-HOOK_RE = re.compile(r'claude-focus(\.exe)?"?\s+hook prompt-submit')
+HOOK_RE = re.compile(r'claude-focus(\.exe)?"?\s+hook prompt-submit', re.IGNORECASE)  # which() gives .EXE
 RULE_TAG = "claude-focus pending"  # any CLAUDE.md that mentions it has a rule already
 MARK_START = "<!-- claude-focus setup: start (claude-focus uninstall removes this block) -->"
 MARK_END = "<!-- claude-focus setup: end -->"
@@ -582,7 +582,7 @@ def _wait_for_profile(name, seconds=5):
 def _open_focus_window(kind, command):
     if kind == terminal.HERDR:
         import asyncio
-        return asyncio.run(herdr.Bridge().open_window(command))
+        return asyncio.run(herdr.Bridge().open_window([command]))
     import iterm2
 
     async def open_window(conn):

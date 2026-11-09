@@ -7,7 +7,7 @@ import shutil
 from . import system
 
 # CLAUDE_FOCUS_DIR points tests at a scratch folder instead of the real state.
-DIR = os.environ.get("CLAUDE_FOCUS_DIR") or os.path.expanduser("~/.claude-focus")
+DIR = os.path.normpath(os.environ.get("CLAUDE_FOCUS_DIR") or os.path.expanduser("~/.claude-focus"))
 STATE = os.path.join(DIR, "state.json")
 CONFIG = os.path.join(DIR, "config.json")
 PRIORITIES = os.path.join(DIR, "priorities.md")

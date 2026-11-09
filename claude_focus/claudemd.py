@@ -9,7 +9,7 @@ import os
 
 from . import pending as pend, store
 
-PATH = os.path.expanduser("~/.claude/CLAUDE.md")
+PATH = os.path.normpath(os.path.expanduser("~/.claude/CLAUDE.md"))
 
 
 def notice(hook, path=None):
