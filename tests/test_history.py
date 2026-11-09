@@ -83,7 +83,7 @@ class IndexTest(unittest.TestCase):
         self.write([entry("user", "dodaj še popust"), {"type": "custom-title", "customTitle": "acme-racuni"}], "a")
         self.assertEqual(self.sync(), 1)
         [hit] = self.search("popust")
-        self.assertEqual(hit["label"], "acme-racuni")  # the user's name wins over the title
+        self.assertEqual(hit["label"], "acme-racuni · October invoice for Acme")  # the user's name, then the title
         self.assertEqual(self.sync(), 0)  # nothing new: the file is not read again
         con = history.connect(self.db)
         self.assertEqual(con.execute("SELECT count(*) FROM texts").fetchone()[0], 3)
@@ -129,6 +129,28 @@ class IndexTest(unittest.TestCase):
         hits = self.search("acme")  # both: the folder name matches both
         self.assertEqual([h["session"] for h in hits], [OTHER, SID])  # newest first
 
+    def test_an_empty_session_is_left_out(self):
+        # Opened and closed at once: only Claude Code's own command echo, nothing to resume.
+        self.write([entry("user", "<command-name>/exit</command-name>")])
+        self.sync()
+        self.assertEqual(self.search("acme"), [])
+
+    def test_without_a_title_the_first_message(self):
+        self.write([entry("user", "\n  Preveri izvoz kontaktov\nza Acme"), entry("user", "in še to")])
+        self.sync()
+        [hit] = self.search("acme")
+        self.assertEqual(hit["label"], "Preveri izvoz kontaktov")
+
+    def test_labels(self):
+        self.assertEqual(history.label("linkmcp", "Website redesign", None), "linkmcp · Website redesign")
+        self.assertEqual(history.label("Acme", "Acme invoices", None), "Acme invoices")  # the name is in it
+        self.assertEqual(history.label(None, "Title", "first", "Opis seje"), "Opis seje")  # a description wins
+        self.assertEqual(history.label("x", None, None), "x")
+        self.assertEqual(history.label(None, None, None), "(no title)")
+
+    def test_timestamps_are_utc(self):
+        self.assertEqual(history._when("2026-07-01T12:00:00.000Z"), 1782907200)  # in summer time too
+
     def test_a_query_fts_cannot_parse(self):
         self.sync()
         self.assertEqual(self.search('"" * ( ^'), [])
@@ -142,6 +164,54 @@ class IndexTest(unittest.TestCase):
 
     def test_no_index_yet(self):
         self.assertEqual(history.search("acme", os.path.join(self.root, "none.db")), [])
+
+
+class DescribeTest(unittest.TestCase):
+    """A small model writes one line per session once it has rested; it
+    stops at the first failed call."""
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.db = os.path.join(tempfile.mkdtemp(), "history.db")
+        os.makedirs(os.path.join(self.root, "-w-acme"))
+        for sid in (SID, OTHER):
+            with open(os.path.join(self.root, "-w-acme", sid + ".jsonl"), "w") as f:
+                for e in TRANSCRIPT:
+                    f.write(json.dumps(dict(e, sessionId=sid)) + "\n")
+        history.sync(self.root, self.db)
+        self.later = history._when("2026-11-09T10:00:00.000Z") + history.QUIET_S + 1
+
+    def describe(self, replies, now=None):
+        call = mock.AsyncMock(side_effect=replies)
+        with mock.patch.object(appmod.scorer, "_claude", call):
+            n = history.describe(self.db, "haiku", now or self.later)
+        return n, call
+
+    def test_written_and_shown(self):
+        n, call = self.describe([{"structured_output": {"about": "Oktobrski račun za Acme, čaka na pošiljanje"},
+                                  "total_cost_usd": 0.0004}] * 2)
+        self.assertEqual(n, 2)
+        prompt = call.await_args_list[0].args[0]
+        self.assertIn("Pripravi račun za Acme", prompt)  # the first message
+        self.assertIn("CLAUDE: Račun je pripravljen v drafts.", prompt)  # the last messages, with roles
+        [hit, _] = history.search("racun", self.db)
+        self.assertEqual(hit["label"], "Oktobrski račun za Acme, čaka na pošiljanje")
+        self.assertEqual(self.describe([])[0], 0)  # nothing more until REDESCRIBE_N new messages
+
+    def test_not_while_it_works(self):
+        n, call = self.describe([], now=self.later - 2)
+        self.assertEqual(n, 0)
+        call.assert_not_awaited()
+
+    def test_a_failed_call_stops_the_run(self):
+        n, _ = self.describe([None, None])
+        self.assertEqual(n, 0)
+        con = history.connect(self.db)
+        self.assertEqual(con.execute("SELECT count(*) FROM files WHERE about IS NULL").fetchone()[0], 2)
+
+    def test_off_without_a_model(self):
+        with mock.patch.object(appmod.scorer, "_claude", mock.AsyncMock()) as call:
+            self.assertEqual(history.describe(self.db, "", self.later), 0)
+        call.assert_not_awaited()
 
 
 class PickerTest(unittest.TestCase):

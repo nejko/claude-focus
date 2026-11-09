@@ -1348,8 +1348,9 @@ class App:
 
     def _hit_lines(self, w, room):
         """Below the folders: the past sessions that match what the user typed,
-        each with its name or title, folder, last activity and the words found
-        in it. At most room rows; the list scrolls to keep the selection in view."""
+        each with what it is about (history.label), its folder, last activity,
+        and the words found in it, else its last prompt. At most room rows;
+        the list scrolls to keep the selection in view."""
         if not self.hits:
             return []
         P, acc = self.pal, self.pal["terminals"]
@@ -1359,14 +1360,16 @@ class App:
         show = max(1, room - 1)
         start = sel - show + 1 if sel >= show else 0
         lines = [f"  {dim}past sessions: Enter resumes one here{R}"]
-        lw = min(36, max(len(h["label"]) for h in self.hits))
+        lw = min(max(30, w // 2 - 24), max(len(h["label"]) for h in self.hits))
         for h in self.hits[start:start + show]:
             on = h is hit
             tone = fg(P["text"] if on else P["soft"])
             snip = (h["snippet"] or "").replace("\x01", f"{R}{fg(acc)}{B}").replace("\x02", f"{R}{dim}")
+            if not snip and h.get("last") and h["last"] not in h["label"]:
+                snip = "last prompt: " + h["last"]
             line = ((f"{fg(acc)}{P.get('marker', '▌')}{R} " if on else "  ")
                     + look.pad(f"{tone}{look.cut(h['label'], lw)}{R}", lw)
-                    + f"  {dim}{look.pad(look.cut_left(short_path(h['cwd']), 28), 28)}  "
+                    + f"  {dim}{look.pad(look.cut_left(short_path(h['cwd']), 24), 24)}  "
                       f"{look.pad(ago(h['last_at']), 9)}{R}"
                     + (f"  {dim}{snip}{R}" if snip else ""))
             line = fit(line, w)

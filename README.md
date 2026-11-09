@@ -476,10 +476,14 @@ that does not exist yet.
 
 Below the folders, the picker lists the past sessions that match what you
 typed (two letters or more): by their name (`/rename`), the title Claude
-Code gave them, the last prompt and the folder, and by what was said in
-them, your messages and Claude's replies (not tool output). Sessions whose
-name, title or folder match come first, then those whose conversation does,
-each newest first, with the words found. Enter on one types
+Code gave them, their description (below), the last prompt and the folder,
+and by what was said in them, your messages and Claude's replies (not tool
+output). Sessions whose name, title, description or folder match come
+first, then those whose conversation does, each newest first. A row shows
+what the session is about (its description, else Claude Code's title, else
+its first message, after the name you gave it), its folder and last
+activity, and the words found, else its last prompt. Sessions that were
+opened and closed without a conversation are left out. Enter on one types
 `cd <folder> && claude --resume <id>` (after `new_session_command`) into the
 free terminal; a session that runs now is not started twice, Enter goes to
 its pane. When no folder matches, the first session is selected, not the
@@ -499,6 +503,19 @@ sessions are left out: a terminal cannot resume them. Claude Code deletes
 transcripts older than `cleanupPeriodDays` (30 days by default, in
 `~/.claude/settings.json`), and the index forgets them with them; raise the
 setting to find older sessions.
+
+**Descriptions.** Claude Code's title comes from a session's first prompt,
+so a session that ran for weeks keeps the title of its first task. The same
+run has `history_model` (Haiku by default) write one line per session: what
+it is about, by the names in it, and where it ended, such as "Hotel Dvorec:
+guest guide and Protel for the assistant, mail sent, waits for a reply". It
+reads the session's names, its first message and its last six messages,
+through your Claude Code (`claude -p`). A session is described once it has
+had no new message for 10 minutes, and again after 10 more messages; each
+run describes at most 12, newest first, so the first runs work through the
+older ones a few minutes at a time. One description cost about $0.0006 with
+Haiku (`claude-focus cost` counts them). `"history_model": ""` turns them
+off.
 
 ## iTerm2
 
@@ -656,6 +673,7 @@ remote machine show without a pane.
 | `scorer_model` | `"claude-sonnet-5-5"` | The model of the claude scorer |
 | `jev_model` | `"jev-latest"` | The model of the jev scorer |
 | `ask_model` | `"claude-haiku-5-5"` | With jev: the model that writes the one-line request (`""` = off) |
+| `history_model` | `"claude-haiku-5-5"` | The model that describes past sessions for the search (`""` = off; see "Past sessions") |
 | `scorer_parallel` | `4` | Sessions scored at the same time |
 | `poll_seconds` | `3` | How often the state is read at the latest; a change of a session's status is read at once |
 | `aging_points_per_hour`, `aging_max` | `0.15`, `10` | The bonus for waiting, added to the score; the sum stays at most 100, and at 100 the longer wait goes first |
@@ -701,6 +719,8 @@ The jev keys live in `~/.config/claude-focus/credentials` (see "Scoring").
   through your Claude Code. jev sends them to TypeSafe, or to OpenRouter
   with an OpenRouter key, and for the request line (`ask_model`) the screen
   and the last message also go to Anthropic through your Claude Code.
+- For a description of a past session (`history_model`), its names, first
+  message and last six messages go to Anthropic through your Claude Code.
   claude-focus sends nothing else anywhere.
 - It types into your terminals only for wake-up messages (only into an
   empty prompt), `/exit` when you close a session with `x` (only into an

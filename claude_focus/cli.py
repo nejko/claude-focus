@@ -466,7 +466,7 @@ def main():
         print(costs.report())
     elif args[0] == "index" and len(args) == 1:
         from . import history
-        history.sync()
+        history.run()
     elif args[0] == "search" and len(args) > 1:
         cmd_search(" ".join(args[1:]))
     elif args[0] == "setup" and set(args[1:]) <= {"--yes", "--dry-run"}:
