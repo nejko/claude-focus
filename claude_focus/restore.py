@@ -14,7 +14,7 @@ import time
 
 from . import pending as pend
 from . import sessions as sessions_mod
-from . import store
+from . import store, system
 
 HISTORY = os.path.join(store.DIR, "layouts.jsonl")
 TUI_FILE = os.path.join(store.DIR, "tui.json")
@@ -103,11 +103,10 @@ def _proc_info(pids):
 def focus_pane():
     """The iTerm session id of the open focus screen, or None."""
     try:
-        with open(TUI_FILE) as f:
+        with open(TUI_FILE, encoding="utf-8") as f:
             info = json.load(f)
-        os.kill(int(info["pid"]), 0)
-        return info.get("session") or None
-    except (OSError, ValueError, KeyError, TypeError):
+        return (info.get("session") or None) if system.pid_alive(info["pid"]) else None
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return None
 
 
@@ -160,7 +159,7 @@ def record(snap, run, last_sig):
         return last_sig
     store.ensure()
     line = json.dumps(dict(snap, at=int(time.time() * 1000), run=run), ensure_ascii=False)
-    with open(HISTORY, "a") as f:
+    with open(HISTORY, "a", encoding="utf-8") as f:
         f.write(line + "\n")
         f.flush()
         os.fsync(f.fileno())
@@ -172,7 +171,7 @@ def save(snap, run):
     the same as the last one). The service opens it by itself after the restart."""
     store.ensure()
     line = dict(snap, at=int(time.time() * 1000), run=run, saved="restart", auto_restore=True)
-    with open(HISTORY, "a") as f:
+    with open(HISTORY, "a", encoding="utf-8") as f:
         f.write(json.dumps(line, ensure_ascii=False) + "\n")
         f.flush()
         os.fsync(f.fileno())
@@ -183,7 +182,7 @@ def save(snap, run):
 
 def read_history():
     try:
-        f = open(HISTORY)
+        f = open(HISTORY, encoding="utf-8")
     except OSError:
         return []
     out = []
@@ -211,7 +210,7 @@ def prune(run):
     cut = (time.time() - KEEP_DAYS * 86400) * 1000
     keep = [d for d in lines if d["at"] >= cut or id(d) in prev]
     tmp = HISTORY + ".tmp"
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         for d in keep:
             f.write(json.dumps(d, ensure_ascii=False) + "\n")
         f.flush()

@@ -11,6 +11,7 @@ import json
 import os
 
 from . import ask, store
+from .system import HIDDEN, program
 
 SCHEMA = {
     "type": "object",
@@ -170,7 +171,7 @@ async def _claude(prompt, system, schema, model, name):
     output, or None on failure (logged; last_error says why)."""
     global last_error
     args = [
-        "claude", "-p", "--model", model,
+        program("claude"), "-p", "--model", model,
         "--output-format", "json", "--no-session-persistence",
         "--tools", "", "--settings", '{"disableAllHooks":true}',
         "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
@@ -186,7 +187,7 @@ async def _claude(prompt, system, schema, model, name):
     try:
         proc = await asyncio.create_subprocess_exec(
             *args, cwd=store.DIR, env=env, stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **HIDDEN,
         )
         out, err = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout=180)
         data = json.loads(out.decode() or "{}")

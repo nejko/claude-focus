@@ -15,7 +15,7 @@ PATH = os.path.join(store.DIR, "costs.jsonl")
 def record(name, model, cost):
     if cost is None:
         return
-    with open(PATH, "a") as f:
+    with open(PATH, "a", encoding="utf-8") as f:
         f.write(json.dumps({"t": int(time.time()), "name": name, "model": model,
                             "usd": round(cost, 6)}) + "\n")
 
@@ -23,7 +23,7 @@ def record(name, model, cost):
 def report(days=14):
     by_day = collections.defaultdict(lambda: [0, 0.0])
     try:
-        with open(PATH) as f:
+        with open(PATH, encoding="utf-8") as f:
             for line in f:
                 try:
                     e = json.loads(line)

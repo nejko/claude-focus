@@ -13,7 +13,12 @@ from unittest import mock
 import _env  # noqa: E402,F401  (first: a scratch CLAUDE_FOCUS_DIR)
 
 from claude_focus import app as appmod  # noqa: E402
-from claude_focus import iterm, look  # noqa: E402
+from claude_focus import look  # noqa: E402
+
+try:
+    from claude_focus import iterm  # noqa: E402
+except ImportError:  # Windows: no iTerm2
+    iterm = None
 from claude_focus.themes import NORTON  # noqa: E402
 
 STAMP = 1790915096936
@@ -333,6 +338,7 @@ class FormatTest(unittest.TestCase):
             self.assertEqual(ANSI.sub("", look.bar(value, 2, (0, 0, 0), (9, 9, 9))), cells)
 
 
+@unittest.skipIf(iterm is None, "iTerm2 bridge: macOS only")
 class TerminalTest(unittest.TestCase):
     """Free terminals: panes that the user switched to the green profile (Available)."""
 

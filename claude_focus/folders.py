@@ -40,7 +40,7 @@ def candidates(roots, claude_json=CLAUDE_JSON, transcripts=TRANSCRIPTS, skip=TEM
     when is the folder's own time (Claude Code deletes old transcripts).
     Folders that are gone, and temporary ones, are left out."""
     try:
-        with open(claude_json) as f:
+        with open(claude_json, encoding="utf-8") as f:
             paths = list(json.load(f).get("projects") or {})
     except (OSError, ValueError, AttributeError):
         paths = []

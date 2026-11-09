@@ -125,14 +125,15 @@ class KeyTest(unittest.TestCase):
         import os
         import tempfile
         from unittest import mock
-        with tempfile.NamedTemporaryFile("w", suffix=".credentials") as f:
+        # Closed before it is read: Windows opens no file twice that is open for writing
+        with tempfile.NamedTemporaryFile("w", suffix=".credentials", delete=False) as f:
             f.write(file)
-            f.flush()
-            clean = {k: v for k, v in os.environ.items()
-                     if k not in ("TYPESAFE_API_KEY", "OPENROUTER_API_KEY")}
-            with mock.patch.dict(os.environ, dict(clean, **env), clear=True), \
-                    mock.patch.object(jev, "CREDENTIALS", f.name):
-                return jev.api_key()
+        self.addCleanup(os.remove, f.name)
+        clean = {k: v for k, v in os.environ.items()
+                 if k not in ("TYPESAFE_API_KEY", "OPENROUTER_API_KEY")}
+        with mock.patch.dict(os.environ, dict(clean, **env), clear=True), \
+                mock.patch.object(jev, "CREDENTIALS", f.name):
+            return jev.api_key()
 
     def test_typesafe(self):
         self.assertEqual(self.key({"TYPESAFE_API_KEY": "ts"}), ("ts", None))

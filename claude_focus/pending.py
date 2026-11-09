@@ -3,7 +3,6 @@
 the queue, and when the time comes or the check succeeds, it types a wake-up
 message into the session, so Claude does the follow-up before the user sees it."""
 import datetime as dt
-import fcntl
 import json
 import os
 import re
@@ -11,7 +10,7 @@ import shlex
 import subprocess
 import time
 
-from . import store
+from . import store, system
 
 SESSIONS_DIR = os.path.expanduser("~/.claude/sessions")
 ENGINE_LOCK = os.path.join(store.DIR, "engine.lock")
@@ -25,15 +24,11 @@ def own_session():
         path = os.path.join(SESSIONS_DIR, f"{pid}.json")
         if os.path.exists(path):
             try:
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     return json.load(f)
             except (OSError, ValueError):
                 return None
-        try:
-            pid = int(subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)],
-                                     capture_output=True, text=True).stdout.strip() or 0)
-        except (OSError, ValueError):
-            return None
+        pid = system.parent_pid(pid)
         if pid <= 1:
             return None
     return None
@@ -46,12 +41,10 @@ def take_engine_lock():
     holds it."""
     store.ensure()
     f = open(ENGINE_LOCK, "w")
-    try:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    if system.lock(f, block=False):
         return f
-    except OSError:
-        f.close()
-        return None
+    f.close()
+    return None
 
 
 SERVICE_PID = os.path.join(store.DIR, "service.pid")
@@ -61,10 +54,9 @@ def service_alive():
     """True while the background service process runs (it may not hold the
     engine lock yet)."""
     try:
-        with open(SERVICE_PID) as f:
-            os.kill(int(f.read().strip()), 0)
-        return True
-    except (OSError, ValueError):
+        with open(SERVICE_PID, encoding="utf-8") as f:
+            return system.pid_alive(f.read().strip())
+    except OSError:
         return False
 
 
@@ -119,8 +111,9 @@ def try_check(check, cwd):
     linkmcp's counted the calls since a fixed date (33 >= 5) and woke it at
     once after each wake-up (2026-10-23 and 24)."""
     try:
-        return subprocess.run(check, shell=True, cwd=cwd or os.path.expanduser("~"), timeout=TRY_TIMEOUT,
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+        return subprocess.run(system.shell_argv(check), cwd=cwd or os.path.expanduser("~"),
+                              timeout=TRY_TIMEOUT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, **system.HIDDEN).returncode
     except (subprocess.TimeoutExpired, OSError):  # OSError: the folder is gone
         return None
 

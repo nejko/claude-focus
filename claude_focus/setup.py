@@ -23,7 +23,6 @@ import contextlib
 import io
 import json
 import os
-import pwd
 import re
 import shlex
 import shutil
@@ -31,7 +30,7 @@ import subprocess
 import sys
 import time
 
-from . import herdr, store, terminal
+from . import herdr, store, system, terminal
 
 CLAUDE_DIR = os.path.expanduser("~/.claude")
 SETTINGS = os.path.join(CLAUDE_DIR, "settings.json")
@@ -39,9 +38,11 @@ CLAUDE_MD = os.path.join(CLAUDE_DIR, "CLAUDE.md")
 PROFILES_DIR = os.path.expanduser("~/Library/Application Support/iTerm2/DynamicProfiles")
 PROFILE_FILE = os.path.join(PROFILES_DIR, "claude-focus.json")
 PROFILE_GUID = "719CE515-5BA5-45D6-880C-834DB5E01564"  # fixed: setup and uninstall find it again
-HERDR_CONFIG = os.path.expanduser(os.environ.get("HERDR_CONFIG_PATH") or "~/.config/herdr/config.toml")
+HERDR_CONFIG = os.path.expanduser(os.environ.get("HERDR_CONFIG_PATH") or os.path.join(herdr.config_dir(), "config.toml"))
 RULE_FILE = os.path.join(os.path.dirname(__file__), "claude_md_rule.md")
 HOOK_TAG = "claude-focus hook prompt-submit"
+# Also `"C:/Users/ana/.local/bin/claude-focus.exe" hook prompt-submit` (Windows)
+HOOK_RE = re.compile(r'claude-focus(\.exe)?"?\s+hook prompt-submit')
 RULE_TAG = "claude-focus pending"  # any CLAUDE.md that mentions it has a rule already
 MARK_START = "<!-- claude-focus setup: start (claude-focus uninstall removes this block) -->"
 MARK_END = "<!-- claude-focus setup: end -->"
@@ -58,7 +59,7 @@ def add_hook(settings, command):
     """Add the UserPromptSubmit hook to a settings dict. Returns True when it
     changed it (False: a claude-focus hook is there already)."""
     hooks = settings.setdefault("hooks", {}).setdefault("UserPromptSubmit", [])
-    if any(HOOK_TAG in h.get("command", "") for group in hooks for h in group.get("hooks", [])):
+    if any(HOOK_RE.search(h.get("command", "")) for group in hooks for h in group.get("hooks", [])):
         return False
     hooks.append({"hooks": [{"type": "command", "command": command, "timeout": 10}]})
     return True
@@ -71,7 +72,7 @@ def remove_hook(settings):
         return False
     kept, removed = [], False
     for group in hooks:
-        inner = [h for h in group.get("hooks", []) if HOOK_TAG not in h.get("command", "")]
+        inner = [h for h in group.get("hooks", []) if not HOOK_RE.search(h.get("command", ""))]
         removed |= len(inner) != len(group.get("hooks", []))
         if inner:
             kept.append(dict(group, hooks=inner))
@@ -104,9 +105,12 @@ def remove_rule(text, mark_start=MARK_START, mark_end=MARK_END):
 
 def herdr_keys(command, go, show):
     """The block of herdr key bindings (herdr's config.toml) that setup adds:
-    custom commands of type "shell" run detached."""
+    custom commands of type "shell" run detached (on Windows by `cmd /d /c`,
+    which needs double quotes)."""
+    quote = (lambda c: f'"{c}"') if system.WINDOWS else shlex.quote
+
     def binding(key, args):
-        line = json.dumps(f"{shlex.quote(command)} {args}")  # a JSON string is a TOML basic string
+        line = json.dumps(f"{quote(command)} {args}")  # a JSON string is a TOML basic string
         return f'[[keys.command]]\nkey = {json.dumps(key)}\ntype = "shell"\ncommand = {line}\n'
     return f"{KEYS_START}\n{binding(go, 'go')}\n{binding(show, 'show')}{KEYS_END}\n"
 
@@ -142,6 +146,9 @@ def profile_plist(name):
 
 def first_name():
     """The first word of this Mac user's full name, else the account name."""
+    if system.WINDOWS:
+        return os.environ.get("USERNAME", "")
+    import pwd
     try:
         full = pwd.getpwuid(os.getuid()).pw_gecos.split(",")[0].strip()
     except KeyError:
@@ -196,15 +203,15 @@ class Setup:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         self.backup(path)
         tmp = path + ".tmp"
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             f.write(text)
         os.replace(tmp, path)
 
     # 1
     def checks(self):
         """Returns the terminal: terminal.HERDR or terminal.ITERM."""
-        if sys.platform != "darwin":
-            sys.exit("claude-focus needs macOS, and herdr or iTerm2.")
+        if sys.platform not in ("darwin", "win32"):
+            sys.exit("claude-focus needs macOS or Windows, and herdr (or iTerm2 on macOS).")
         kind = terminal.detect()
         if kind is None:
             if os.path.exists("/Applications/iTerm.app"):
@@ -281,7 +288,7 @@ class Setup:
     # 4
     def hook(self):
         try:
-            with open(SETTINGS) as f:
+            with open(SETTINGS, encoding="utf-8") as f:
                 settings = json.load(f)
         except FileNotFoundError:
             settings = {}
@@ -290,7 +297,7 @@ class Setup:
                       "run setup again.")
             self.todo.append(f"Fix {SETTINGS}, then run `claude-focus setup` again.")
             return
-        command = f"{command_path()} hook prompt-submit"
+        command = f"{system.hook_path(command_path())} hook prompt-submit"
         if not add_hook(settings, command):
             self.done("prompt hook: already in ~/.claude/settings.json")
             return
@@ -299,8 +306,8 @@ class Setup:
 
     # 5
     def rule(self):
-        text = open(CLAUDE_MD).read() if os.path.exists(CLAUDE_MD) else ""
-        new, changed = add_rule(text, open(RULE_FILE).read())
+        text = open(CLAUDE_MD, encoding="utf-8").read() if os.path.exists(CLAUDE_MD) else ""
+        new, changed = add_rule(text, open(RULE_FILE, encoding="utf-8").read())
         if not changed:
             self.done("CLAUDE.md: the rule for waits is there")
             return
@@ -357,7 +364,7 @@ class Setup:
     def herdr_keys(self, path):
         cfg = store.load_config()
         go, show = cfg["herdr_key_go"], cfg["herdr_key_focus_window"]
-        text = open(HERDR_CONFIG).read() if os.path.exists(HERDR_CONFIG) else ""
+        text = open(HERDR_CONFIG, encoding="utf-8").read() if os.path.exists(HERDR_CONFIG) else ""
         what = f"{go} goes to the session that needs you most, {show} shows the focus screen"
         if KEYS_START in text:
             self.done(f"herdr keys: {what}")
@@ -386,8 +393,13 @@ class Setup:
     def service(self, kind):
         from . import cli
         if self.dry_run:
-            self.change("install the background service" if not os.path.exists(cli.PLIST)
-                        else "restart the background service on this code")
+            if system.WINDOWS:
+                from . import winservice
+                there = winservice.registered()
+            else:
+                there = os.path.exists(cli.PLIST)
+            self.change("restart the background service on this code" if there
+                        else "install the background service")
             return
         before = _log_size()
         try:
@@ -397,7 +409,11 @@ class Setup:
             self.warn(f"the background service did not start: {ex}")
             self.todo.append("Run `claude-focus install-daemon` and check its message.")
             return
-        self.change(f"background service {cli.LABEL} installed and started")
+        label = cli.LABEL
+        if system.WINDOWS:
+            from . import winservice
+            label = winservice.LABEL
+        self.change(f"background service {label} installed and started")
         if kind == terminal.ITERM:
             print("    (macOS may ask once more whether the service may control iTerm2: allow it)")
         deadline = time.time() + SERVICE_WAIT
@@ -459,9 +475,9 @@ def uninstall(purge=False):
     print("claude-focus uninstall")
     with contextlib.redirect_stdout(io.StringIO()):
         cli.cmd_uninstall_daemon()
-    print(f"  - background service {cli.LABEL} stopped and removed")
+    print("  - background service stopped and removed")
     try:
-        with open(SETTINGS) as f:
+        with open(SETTINGS, encoding="utf-8") as f:
             settings = json.load(f)
         if remove_hook(settings):
             _replace(SETTINGS, json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
@@ -469,7 +485,7 @@ def uninstall(purge=False):
     except (OSError, ValueError):
         pass
     if os.path.exists(CLAUDE_MD):
-        text, changed = remove_rule(open(CLAUDE_MD).read())
+        text, changed = remove_rule(open(CLAUDE_MD, encoding="utf-8").read())
         if changed:
             _replace(CLAUDE_MD, text)
             print(f"  - the rule for waits removed from {CLAUDE_MD}")
@@ -479,7 +495,7 @@ def uninstall(purge=False):
         os.remove(PROFILE_FILE)
         print("  - the green iTerm2 profile removed")
     if os.path.exists(HERDR_CONFIG):
-        text, changed = remove_herdr_keys(open(HERDR_CONFIG).read())
+        text, changed = remove_herdr_keys(open(HERDR_CONFIG, encoding="utf-8").read())
         if changed:
             _replace(HERDR_CONFIG, text)
             herdr.call(herdr.socket_path(), "server.reload_config")
@@ -496,7 +512,7 @@ def uninstall(purge=False):
 
 def _replace(path, text):
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         f.write(text)
     os.replace(tmp, path)
 
@@ -537,10 +553,9 @@ def _iterm_info():
         app = await iterm2.async_get_app(conn)
         running = False
         try:
-            with open(TUI_FILE) as f:
+            with open(TUI_FILE, encoding="utf-8") as f:
                 tui = json.load(f)
-            os.kill(int(tui["pid"]), 0)
-            running = app.get_session_by_id(tui["session"]) is not None
+            running = system.pid_alive(tui["pid"]) and app.get_session_by_id(tui["session"]) is not None
         except (OSError, ValueError, KeyError, TypeError):
             pass
         return {"profiles": [p.name for p in profiles], "default_profile": default.name,
@@ -584,7 +599,7 @@ def _log_size():
 
 def _log_since(offset):
     try:
-        with open(store.LOG) as f:
+        with open(store.LOG, encoding="utf-8") as f:
             f.seek(offset)
             return f.read()
     except OSError:

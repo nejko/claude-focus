@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 
-from . import store, terminal
+from . import store, system, terminal
 
 
 def print_queue(app):
@@ -348,6 +348,11 @@ def lasting(path):
 
 
 def cmd_install_daemon():
+    if system.WINDOWS:
+        from . import winservice
+        winservice.install()
+        print(f"Installed and started {winservice.LABEL}. Log: {winservice.LOG}")
+        return
     import plistlib
 
     store.ensure()
@@ -395,6 +400,11 @@ def _stop_service(domain, seconds=10):
 
 
 def cmd_uninstall_daemon():
+    if system.WINDOWS:
+        from . import winservice
+        winservice.uninstall()
+        print(f"Stopped and removed {winservice.LABEL}.")
+        return
     _stop_service(f"gui/{os.getuid()}")
     if os.path.exists(PLIST):
         os.remove(PLIST)
@@ -403,6 +413,10 @@ def cmd_uninstall_daemon():
 
 def cmd_service_status():
     print(f"terminal: {terminal.describe(terminal.detect())}")
+    if system.WINDOWS:
+        from . import winservice
+        print("\n".join(winservice.status()))
+        return
     r = _launchctl("print", f"gui/{os.getuid()}/{LABEL}")
     if r.returncode != 0:
         print("Service not installed.")
@@ -413,6 +427,7 @@ def cmd_service_status():
 
 
 def main():
+    system.utf8_stdio()
     args = sys.argv[1:]
     if not args:
         from .app import main as tui
@@ -435,7 +450,11 @@ def main():
     elif args[0] == "reboot":
         cmd_reboot(args[1:])
     elif args[0] == "daemon":
-        cmd_daemon()
+        if system.WINDOWS and args[1:] != ["--run"]:
+            from . import winservice
+            winservice.supervise()  # the Run key starts this; it runs `daemon --run`
+        else:
+            cmd_daemon()
     elif args[0] == "install-daemon":
         cmd_install_daemon()
     elif args[0] == "uninstall-daemon":

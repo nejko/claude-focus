@@ -1,9 +1,10 @@
-"""State and config under ~/.claude-focus/ (atomic JSON writes, flock)."""
+"""State and config under ~/.claude-focus/ (atomic JSON writes, a file lock)."""
 import contextlib
-import fcntl
 import json
 import os
 import shutil
+
+from . import system
 
 # CLAUDE_FOCUS_DIR points tests at a scratch folder instead of the real state.
 DIR = os.environ.get("CLAUDE_FOCUS_DIR") or os.path.expanduser("~/.claude-focus")
@@ -59,16 +60,16 @@ def ensure():
 def locked():
     ensure()
     with open(LOCK, "w") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+        system.lock(f)
         try:
             yield
         finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+            system.unlock(f)
 
 
 def _read(path, default):
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
         return default
@@ -76,9 +77,9 @@ def _read(path, default):
 
 def _write(path, data):
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=1, ensure_ascii=False)
-    os.replace(tmp, path)
+    system.replace(tmp, path)
 
 
 def load_state():
@@ -127,7 +128,7 @@ def local_zone():
 
 def priorities_text():
     try:
-        with open(PRIORITIES) as f:
+        with open(PRIORITIES, encoding="utf-8") as f:
             return f.read()
     except OSError:
         return ""
@@ -136,5 +137,5 @@ def priorities_text():
 def log(msg):
     import time
     ensure()
-    with open(LOG, "a") as f:
+    with open(LOG, "a", encoding="utf-8") as f:
         f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")

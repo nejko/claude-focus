@@ -1,6 +1,6 @@
-"""The herdr bridge against a fake herdr server on a scratch socket. The
-replies have the shapes that herdr 0.9.5 (API protocol 22) gave on
-2026-10-21."""
+"""The herdr bridge against a fake herdr server on a scratch socket (on
+Windows a named pipe, as herdr's). The replies have the shapes that herdr
+0.9.5 (API protocol 22) gave on 2026-10-21."""
 import asyncio
 import json
 import os
@@ -11,7 +11,7 @@ from unittest import mock
 import _env  # noqa: E402,F401  (first: a scratch CLAUDE_FOCUS_DIR)
 
 from claude_focus import app as appmod  # noqa: E402
-from claude_focus import herdr, store  # noqa: E402
+from claude_focus import herdr, store, system  # noqa: E402
 from claude_focus.screen import DRAFT, EMPTY  # noqa: E402
 
 RULE = "\x1b[0m\x1b[38;2;136;136;136m" + "─" * 60 + "\x1b[0m"
@@ -27,6 +27,29 @@ def pane(pane_id, agent=None, session=None, focused=False, cwd="/Users/ana/Proje
     if session:
         row["agent_session"] = {"source": "herdr:claude", "agent": "claude", "kind": "id", "value": session}
     return row
+
+
+async def serve(handle, path):
+    """Serve handle(reader, writer) on herdr's transport: a Unix socket, on
+    Windows a named pipe (the proactor loop's pipe server)."""
+    if not system.WINDOWS:
+        return await asyncio.start_unix_server(handle, path=path)
+
+    def protocol():
+        return asyncio.StreamReaderProtocol(asyncio.StreamReader(limit=1 << 20), handle)
+    return PipeServer(await asyncio.get_running_loop().start_serving_pipe(protocol, herdr.pipe_name(path)))
+
+
+class PipeServer:
+    def __init__(self, servers):
+        self.servers = servers
+
+    def close(self):
+        for s in self.servers:
+            s.close()
+
+    async def wait_closed(self):
+        await asyncio.sleep(0)
 
 
 class FakeHerdr:
@@ -96,7 +119,7 @@ class BridgeTest(unittest.TestCase):
 
     def run_bridge(self, fn):
         async def main():
-            server = await asyncio.start_unix_server(self.fake.handle, path=self.fake.path)
+            server = await serve(self.fake.handle, self.fake.path)
             try:
                 bridge = herdr.Bridge(self.fake.path)
                 await bridge.refresh()

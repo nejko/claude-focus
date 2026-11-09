@@ -149,7 +149,8 @@ class NewFolderTest(unittest.TestCase):
 
     def test_a_path_as_typed(self):
         self.assertEqual(folders.new_folder(self.tmp + "/notes/", self.roots), os.path.join(self.tmp, "notes"))
-        self.assertEqual(folders.new_folder("~/x-new-folder", self.roots), os.path.expanduser("~/x-new-folder"))
+        self.assertEqual(folders.new_folder("~/x-new-folder", self.roots),
+                         os.path.normpath(os.path.expanduser("~/x-new-folder")))
 
     def test_without_a_project_folder_the_home_folder(self):
         self.assertEqual(folders.new_folder("x", [self.roots[0]]), os.path.join(os.path.expanduser("~"), "x"))

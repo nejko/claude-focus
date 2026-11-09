@@ -1,10 +1,14 @@
-"""herdr bridge (its socket API, https://herdr.dev): find a Claude session's
+r"""herdr bridge (its socket API, https://herdr.dev): find a Claude session's
 pane, read its screen, type into it, bring it to the front, and show the
 queue in herdr's sidebar. The same methods as iterm.Bridge.
 
 herdr knows each pane's foreground processes, and its Claude Code hook
 (`herdr integration install claude`) reports each pane's session id, so a
-session's pane is found by its process, else by its session id: no tty."""
+session's pane is found by its process, else by its session id: no tty.
+
+The API is newline-delimited JSON over a Unix socket, on Windows over a named
+pipe: \\.\pipe\ followed by the socket's path (%APPDATA%\herdr\herdr.sock),
+which only the same Windows account may open (herdr 0.9.5, src/platform/windows.rs)."""
 import asyncio
 import json
 import os
@@ -13,12 +17,25 @@ import socket
 import subprocess
 import time
 
-from . import store
+from . import store, system
 from .screen import EMPTY, OTHER, clean, prompt_state, strip_ansi, without_suggestion
-from .terminal import SHELLS
+from .terminal import shell_name
 
 PROTOCOL = 22             # the API version this was written for (herdr 0.9.5)
-DEFAULT_SOCKET = os.path.expanduser("~/.config/herdr/herdr.sock")
+
+
+def config_dir():
+    r"""herdr's config folder, as herdr finds it (src/config/io.rs): under
+    $XDG_CONFIG_HOME, else %APPDATA%\herdr on Windows, ~/.config/herdr elsewhere."""
+    if os.environ.get("XDG_CONFIG_HOME"):
+        return os.path.join(os.environ["XDG_CONFIG_HOME"], "herdr")
+    if system.WINDOWS:
+        return os.path.join(os.environ.get("APPDATA") or os.path.expanduser(r"~\AppData\Roaming"), "herdr")
+    return os.path.expanduser("~/.config/herdr")
+
+
+DEFAULT_SOCKET = os.path.join(config_dir(), "herdr.sock")
+PIPE_PREFIX = "\\\\.\\pipe\\"  # a named pipe's name: this prefix, then the socket path
 TIMEOUT = 5               # seconds for one request
 GONE_AFTER = 10           # failed refreshes in a row before the bridge gives up (herdr quit)
 FRONT_SECONDS = 1.0       # how long the answer "is herdr's terminal the front app" is kept
@@ -42,23 +59,104 @@ class Error(Exception):
     """herdr refused a request, or no server answered."""
 
 
+def pipe_name(path):
+    """The named pipe of a herdr socket path (Windows)."""
+    return path if path.startswith(PIPE_PREFIX) else PIPE_PREFIX + path
+
+
+def _exchange_socket(path, data, timeout):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(timeout)
+        s.connect(path)
+        s.sendall(data)
+        buf = b""
+        while not buf.endswith(b"\n"):
+            chunk = s.recv(1 << 20)
+            if not chunk:
+                break
+            buf += chunk
+    return buf
+
+
+def _exchange_pipe(path, data, timeout):
+    """One request and its answer on a named pipe, with a timeout: overlapped
+    I/O through _winapi (as multiprocessing does), so no pywin32 is needed."""
+    import _winapi
+    name = pipe_name(path)
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            handle = _winapi.CreateFile(name, _winapi.GENERIC_READ | _winapi.GENERIC_WRITE, 0, _winapi.NULL,
+                                        _winapi.OPEN_EXISTING, _winapi.FILE_FLAG_OVERLAPPED, _winapi.NULL)
+            break
+        except OSError as ex:
+            # Every instance busy: herdr makes a new one at once, so wait a little.
+            if getattr(ex, "winerror", None) != _winapi.ERROR_PIPE_BUSY or time.monotonic() > deadline:
+                raise
+            try:
+                _winapi.WaitNamedPipe(name, 100)
+            except OSError:
+                time.sleep(0.01)
+
+    def wait(ov, err):
+        if err == _winapi.ERROR_IO_PENDING:
+            left = max(0, int((deadline - time.monotonic()) * 1000))
+            if _winapi.WaitForMultipleObjects([ov.event], False, left) == _winapi.WAIT_TIMEOUT:
+                ov.cancel()
+                ov.GetOverlappedResult(True)
+                raise TimeoutError("herdr did not answer in time")
+        return ov.GetOverlappedResult(True)
+
+    try:
+        ov, err = _winapi.WriteFile(handle, data, overlapped=True)
+        wait(ov, err)
+        buf = b""
+        while not buf.endswith(b"\n"):
+            try:
+                ov, err = _winapi.ReadFile(handle, 1 << 20, overlapped=True)
+            except OSError as ex:
+                if getattr(ex, "winerror", None) == _winapi.ERROR_BROKEN_PIPE:
+                    break  # herdr closed the connection
+                raise
+            _, err = wait(ov, err)
+            if err not in (0, _winapi.ERROR_MORE_DATA):
+                break
+            chunk = ov.getbuffer()
+            if not chunk:
+                break
+            buf += bytes(chunk)
+        return buf
+    finally:
+        _winapi.CloseHandle(handle)
+
+
+def exchange(path, data, timeout=TIMEOUT):
+    """Send one request line and read the answer line: herdr's socket, or on
+    Windows its named pipe."""
+    return (_exchange_pipe if system.WINDOWS else _exchange_socket)(path, data, timeout)
+
+
+async def open_stream(path, limit=1 << 20):
+    """(reader, writer) asyncio streams on herdr's socket, or on Windows its
+    named pipe (needs the proactor event loop, Windows' default)."""
+    if not system.WINDOWS:
+        return await asyncio.open_unix_connection(path, limit=limit)
+    loop = asyncio.get_running_loop()
+    reader = asyncio.StreamReader(limit=limit, loop=loop)
+    protocol = asyncio.StreamReaderProtocol(reader, loop=loop)
+    transport, _ = await loop.create_pipe_connection(lambda: protocol, pipe_name(path))
+    return reader, asyncio.StreamWriter(transport, protocol, reader, loop)
+
+
 def request_now(path, method, params=None, timeout=TIMEOUT):
     """One request on its own connection, blocking: herdr answers one request
     per connection and then closes it. The request goes out right after the
     connect: from asyncio's streams, which send it a moment later, herdr
     0.9.5 answers only after about 100 ms (measured 2026-10-21), from here
-    in under 1 ms."""
+    in under 1 ms (a named pipe on Windows: about 1 ms, 2026-11-09)."""
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-            s.settimeout(timeout)
-            s.connect(path)
-            s.sendall((json.dumps({"id": SOURCE, "method": method, "params": params or {}}) + "\n").encode())
-            buf = b""
-            while not buf.endswith(b"\n"):
-                chunk = s.recv(1 << 20)
-                if not chunk:
-                    break
-                buf += chunk
+        buf = exchange(path, (json.dumps({"id": SOURCE, "method": method, "params": params or {}}) + "\n").encode(),
+                       timeout)
     except OSError as ex:
         raise Error(f"herdr {method}: no server at {path} ({type(ex).__name__})") from None
     try:
@@ -97,6 +195,8 @@ def front_is_herdr(ps_out=None, front_pid=None):
     """Is the front app the terminal that shows herdr (an app with a herdr
     client among its child processes)? herdr's focused pane gets the user's
     keys only then. None when macOS does not say."""
+    if system.WINDOWS and ps_out is None:
+        return _front_is_herdr_windows(front_pid)
     try:
         if front_pid is None:
             asn = subprocess.run(["lsappinfo", "front"], capture_output=True, text=True, timeout=2).stdout.strip()
@@ -130,8 +230,43 @@ def front_is_herdr(ps_out=None, front_pid=None):
     return False
 
 
+def _front_is_herdr_windows(front_pid=None, procs=None):
+    """front_is_herdr on Windows: the foreground window's process is an
+    ancestor of a herdr client (WindowsTerminal.exe <- herdr.exe, measured
+    2026-11-09). None when Windows does not say, or when no herdr client
+    descends from any process: a shell that Windows Terminal adopted
+    (started from the Start menu) has explorer.exe as its parent."""
+    try:
+        front_pid = front_pid or system.front_pid()
+        procs = procs if procs is not None else system.processes()
+    except Exception:
+        return None
+    if not front_pid:
+        return None
+    clients = [pid for pid, (_, name, argv) in procs.items()
+               if name.lower() == "herdr.exe" and "server" not in argv[1:2]]
+    if not clients:
+        return False
+    seen_terminal = False
+    for pid in clients:
+        for _ in range(64):
+            if pid == front_pid:
+                return True
+            ppid, name, _ = procs.get(pid, (0, "", []))
+            seen_terminal |= name.lower() in TERMINAL_APPS
+            if ppid <= 0 or ppid == pid:
+                break
+            pid = ppid
+    return False if seen_terminal else None
+
+
+TERMINAL_APPS = {"windowsterminal.exe", "openconsole.exe", "conhost.exe", "wezterm-gui.exe", "alacritty.exe"}
+
+
 def appearance():
-    """macOS's appearance: "dark" or "light"."""
+    """macOS's appearance: "dark" or "light" (on Windows the app mode)."""
+    if system.WINDOWS:
+        return system.windows_appearance()
     try:
         out = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"], capture_output=True,
                              text=True, timeout=5).stdout
@@ -267,7 +402,7 @@ class Bridge:
     @staticmethod
     def is_free(profile, job, cfg):
         """A free terminal: a pane at a bare shell, with no agent in it."""
-        return (job or "").lstrip("-") in SHELLS
+        return shell_name(job) is not None
 
     async def screen_text(self, pane, max_lines=45):
         try:
@@ -373,7 +508,7 @@ class Bridge:
         """herdr's events of these types as they come; None every `every`
         seconds without one."""
         try:
-            reader, writer = await asyncio.open_unix_connection(self.path, limit=1 << 20)
+            reader, writer = await open_stream(self.path)
         except OSError as ex:
             raise Error(f"no herdr server at {self.path} ({type(ex).__name__})") from None
         try:

@@ -8,6 +8,11 @@ from unittest import mock
 
 import _env  # noqa: E402,F401  (first: a scratch CLAUDE_FOCUS_DIR)
 
+try:
+    import iterm2  # noqa: F401
+except ImportError:  # Windows: no iTerm2
+    raise unittest.SkipTest("iTerm2 bridge: macOS only")
+
 from claude_focus import app as appmod  # noqa: E402
 from claude_focus import iterm, store  # noqa: E402
 

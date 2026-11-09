@@ -6,20 +6,18 @@ import asyncio
 import datetime as dt
 import json
 import os
-import shlex
 import shutil
 import sys
-import termios
+import threading
 import time
-import tty as ttymod
 
 from . import costs, folders, look
 from . import pending as pend
 from . import queue as q
-from . import restore, scorer, sessions as sessions_mod, store, terminal, themes, watch
+from . import restore, scorer, sessions as sessions_mod, store, system, terminal, themes, watch
 from .look import B, R, bg, fg, fit, mix, width
 from .screen import EMPTY
-from .terminal import SHELLS
+from .terminal import shell_name, start_command
 
 FOCUS_BAR = "\033[1;30;42m"  # the title bar while this window has the keys: bold black on green
 # A status must hold this long before it is scored. A Claude score costs
@@ -84,7 +82,8 @@ def ago(t):
 
 def short_path(path):
     home = os.path.expanduser("~")
-    return "~" + path[len(home):] if path == home or (path or "").startswith(home + "/") else path or "?"
+    inside = path == home or (path or "").startswith((home + "/", home + os.sep))
+    return "~" + path[len(home):] if inside else path or "?"
 
 
 def work_label(s):
@@ -93,12 +92,7 @@ def work_label(s):
     return label + (" (background session)" if s.get("kind") in ("bg", "background") else "")
 
 
-def _pid_alive(pid):
-    try:
-        os.kill(int(pid), 0)
-        return True
-    except (OSError, ValueError):
-        return False
+_pid_alive = system.pid_alive
 
 
 def log_status_changes(before, after):
@@ -123,6 +117,43 @@ def log_status_changes(before, after):
             store.log(f"status {s.get('name')}: {was['status']} -> {s['status']}{lag}")
     for key in old.keys() - new.keys():
         store.log(f"status {old[key].get('name')}: ended")
+
+
+# Windows: msvcrt.getwch gives an arrow key as \xe0 (or \x00) and a letter
+WIN_KEYS = {"H": "\x1b[A", "P": "\x1b[B", "M": "\x1b[C", "K": "\x1b[D"}
+
+
+def win_keys(getwch, kbhit):
+    """One read from the Windows console: a key, and the keys that came with
+    it (an escape sequence that the console passes through as characters),
+    in the form tokens() splits. Ctrl-C ends the focus screen, as on a Unix
+    terminal."""
+    out = ""
+    while True:
+        c = getwch()
+        if c in ("\x00", "\xe0"):
+            out += WIN_KEYS.get(getwch(), "")
+        elif c == "\x03":
+            raise KeyboardInterrupt
+        else:
+            out += c
+        if not kbhit():
+            return out
+
+
+def _read_keys_windows(loop, keyq):
+    """A thread: put the console's keys into keyq (Windows has no add_reader
+    for the console)."""
+    import _thread
+    import msvcrt
+    while True:
+        try:
+            data = win_keys(msvcrt.getwch, msvcrt.kbhit)
+        except KeyboardInterrupt:
+            _thread.interrupt_main()
+            return
+        if data:
+            loop.call_soon_threadsafe(keyq.put_nowait, data)
 
 
 def tokens(data):
@@ -288,13 +319,13 @@ class App:
         if status != self.last_status or int(time.time()) % 30 < self.cfg["poll_seconds"]:
             self.last_status = status
             tmp = STATUS_FILE + ".tmp"
-            with open(tmp, "w") as f:
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(dict(status, at=int(time.time())), f)
-            os.replace(tmp, STATUS_FILE)
+            system.replace(tmp, STATUS_FILE)
 
     def _read_status(self):
         try:
-            with open(STATUS_FILE) as f:
+            with open(STATUS_FILE, encoding="utf-8") as f:
                 self.remote = json.load(f)
         except (OSError, ValueError):
             self.remote = {}
@@ -446,7 +477,7 @@ class App:
             if sid not in self.claude_panes:
                 continue
             name, last = self.claude_panes[sid]
-            if (job or "").lstrip("-") in SHELLS:
+            if shell_name(job):
                 del self.claude_panes[sid]
                 if profile != free and await self.bridge.set_profile(sid, free):
                     store.log(f"pane {tty}: {name} ended, the terminal is free (profile {free})")
@@ -538,9 +569,10 @@ class App:
     async def run_check(self, s, p):
         sid = s["sessionId"]
         try:
-            proc = await asyncio.create_subprocess_shell(
-                p["check"], cwd=p.get("cwd") or os.path.expanduser("~"),
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+            proc = await asyncio.create_subprocess_exec(
+                *system.shell_argv(p["check"]), cwd=p.get("cwd") or os.path.expanduser("~"),
+                stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT, **system.HIDDEN)
             try:
                 out, _ = await asyncio.wait_for(proc.communicate(), timeout=CHECK_TIMEOUT)
                 rc, out = proc.returncode, out.decode("utf-8", "replace")
@@ -779,13 +811,12 @@ class App:
         `mkdir -p <folder> && ` first; flags such as " --continue" after the
         command), give it the session profile (iTerm2), and go there. Only
         into a pane that is still at a bare shell; Ctrl-U first clears
-        anything typed at its prompt."""
+        anything typed at its prompt. PowerShell and cmd.exe get their own
+        syntax (terminal.start_command)."""
         info = {sid: (profile, job) for sid, _, profile, _, job in await self.bridge.pane_info()}
         profile, job = info.get(term["pane"], (None, None))
-        where = shlex.quote(path)
-        mkdir = f"mkdir -p {where} && " if create else ""
-        if (job or "").lstrip("-") not in SHELLS or not await self.bridge.send_text(
-                term["pane"], f"\x15{mkdir}cd {where} && {self.cfg['new_session_command']}{flags}\r"):
+        line = start_command(job, path, self.cfg["new_session_command"] + flags, create)
+        if line is None or not await self.bridge.send_text(term["pane"], line):
             self.flash(f"The terminal {term['tty']} is not at a shell prompt any more: nothing started.")
             return
         if self.bridge.profiles and profile == self.cfg["free_profile"]:
@@ -1447,7 +1478,7 @@ class App:
 
     async def run_headless(self):
         store.ensure()
-        with open(pend.SERVICE_PID, "w") as f:
+        with open(pend.SERVICE_PID, "w", encoding="utf-8") as f:
             f.write(str(os.getpid()))
         await self.bridge.start()
         store.log(f"service connected to {self.bridge.label} (pid {os.getpid()})")
@@ -1469,7 +1500,7 @@ class App:
     async def run(self):
         store.ensure()
         own = self.bridge.own_pane()
-        with open(TUI_FILE, "w") as f:
+        with open(TUI_FILE, "w", encoding="utf-8") as f:
             json.dump({"pid": os.getpid(), "session": own}, f)
         await self.bridge.start()
         self.focused = await self.bridge.has_focus(own)
@@ -1481,8 +1512,11 @@ class App:
             self.prev_layout = await loop.run_in_executor(
                 None, lambda: restore.previous_layout(restore.read_history(), restore.iterm_run()))
         keyq = asyncio.Queue()
-        fd = sys.stdin.fileno()
-        loop.add_reader(fd, lambda: keyq.put_nowait(os.read(fd, 64).decode("utf-8", "ignore")))
+        if system.WINDOWS:
+            threading.Thread(target=_read_keys_windows, args=(loop, keyq), daemon=True).start()
+        else:
+            fd = sys.stdin.fileno()
+            loop.add_reader(fd, lambda: keyq.put_nowait(os.read(fd, 64).decode("utf-8", "ignore")))
         asyncio.ensure_future(self.poll_loop())
         asyncio.ensure_future(self.render_loop())
         self._start_hotkeys()
@@ -1502,19 +1536,37 @@ async def show_focus(bridge):
         await bridge.open_window(BIN)
 
 
+def _windows_console():
+    """Let the Windows console act on escape sequences (colors, cursor
+    moves, the alternate screen): ENABLE_VIRTUAL_TERMINAL_PROCESSING."""
+    import ctypes
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+    mode = ctypes.c_uint32()
+    if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+        kernel32.SetConsoleMode(handle, mode.value | 0x0004)
+
+
 def main():
     kind = terminal.detect()
     if kind is None:
         sys.exit(terminal.NOT_RUNNING)
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
+    if system.WINDOWS:
+        _windows_console()
+        restore_tty = lambda: None  # noqa: E731  (msvcrt reads keys without a mode change)
+    else:
+        import termios
+        import tty as ttymod
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        ttymod.setcbreak(fd)
+        restore_tty = lambda: termios.tcsetattr(fd, termios.TCSADRAIN, old)  # noqa: E731
     sys.stdout.write("\033[?1049h\033[?25l\033]0;claude-focus\007\033[2J")
     try:
-        ttymod.setcbreak(fd)
         terminal.run(lambda bridge: App(bridge).run(), kind)
     except KeyboardInterrupt:
         pass
     finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        restore_tty()
         sys.stdout.write("\033[?25h\033[?1049l")
         sys.stdout.flush()

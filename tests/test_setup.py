@@ -143,7 +143,8 @@ class SetupStepsTest(unittest.TestCase):
         first = self.files()
         self.assertEqual(json.loads(first[store.CONFIG]),
                          {"user_name": "Ana", "auto_profiles": True, "session_profile": "Main"})
-        self.assertIn("claude-focus hook prompt-submit", first[su.SETTINGS])
+        hook = json.loads(first[su.SETTINGS])["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
+        self.assertRegex(hook, su.HOOK_RE)
         self.assertIn("claude-focus pending", first[su.CLAUDE_MD])
         self.assertEqual(json.loads(first[su.PROFILE_FILE])["Profiles"][0]["Name"], "Available")
         self.assertTrue(os.path.exists(su.SETTINGS + su.BACKUP))
@@ -175,7 +176,8 @@ class SetupStepsTest(unittest.TestCase):
         s = su.Setup(yes=True)
         out = io.StringIO()
         reply = lambda path, method, params=None: answers or {}  # noqa: E731
-        with mock.patch.object(su.herdr, "call", side_effect=reply) as call, contextlib.redirect_stdout(out):
+        with mock.patch.object(su.herdr, "call", side_effect=reply) as call, contextlib.redirect_stdout(out), \
+                mock.patch.object(su.system, "WINDOWS", False):  # POSIX quoting (Windows: test_windows)
             s.herdr_keys("/x/herdr.sock")
         return out.getvalue(), [c.args[1] for c in call.call_args_list]
 
@@ -233,8 +235,15 @@ class SetupStepsTest(unittest.TestCase):
 
 class HerdrKeysTest(unittest.TestCase):
     def test_a_path_with_a_space_is_quoted(self):
-        block = su.herdr_keys("/Users/ana/My Tools/claude-focus", "prefix+a", "prefix+f")
+        with mock.patch.object(su.system, "WINDOWS", False):
+            block = su.herdr_keys("/Users/ana/My Tools/claude-focus", "prefix+a", "prefix+f")
         self.assertIn("command = \"'/Users/ana/My Tools/claude-focus' go\"", block)
+
+    def test_windows_quotes_for_cmd(self):
+        """herdr runs a key's command with `cmd /d /c` on Windows: double quotes."""
+        with mock.patch.object(su.system, "WINDOWS", True):
+            block = su.herdr_keys(r"C:\Users\ana\.local\bin\claude-focus.exe", "prefix+a", "prefix+f")
+        self.assertIn(r'command = "\"C:\\Users\\ana\\.local\\bin\\claude-focus.exe\" go"', block)
 
     def test_add_and_remove_restore_the_text(self):
         block = su.herdr_keys("/bin/claude-focus", "prefix+a", "prefix+f")

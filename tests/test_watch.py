@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import queue
+import select
 import tempfile
 import time
 import unittest
@@ -14,6 +15,9 @@ import _env  # noqa: E402,F401  (first: a scratch CLAUDE_FOCUS_DIR)
 
 from claude_focus import app as appmod  # noqa: E402
 from claude_focus import store, watch  # noqa: E402
+
+if not hasattr(select, "kqueue"):
+    raise unittest.SkipTest("kqueue: macOS and BSD only (Windows polls)")
 
 
 class WatchTest(unittest.TestCase):

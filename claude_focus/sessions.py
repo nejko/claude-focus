@@ -12,6 +12,8 @@ import re
 import subprocess
 import time
 
+from . import system
+
 HOME = os.path.expanduser("~")
 PROJECTS = os.path.join(HOME, ".claude", "projects")
 TAIL_BYTES = 600_000
@@ -38,11 +40,12 @@ def _from_files():
     rows, starting = [], 0
     for n in names:
         try:
-            with open(os.path.join(SESSIONS_DIR, n)) as f:
+            with open(os.path.join(SESSIONS_DIR, n), encoding="utf-8") as f:
                 d = json.load(f)
-            os.kill(int(d["pid"]), 0)
+            if not system.pid_alive(d["pid"]):
+                continue  # stale file of an exited process
         except (OSError, ValueError, KeyError, TypeError):
-            continue  # stale file of an exited process, or a partial write
+            continue  # a partial write
         if "status" not in d or "sessionId" not in d:
             starting += 1
             continue
@@ -53,8 +56,8 @@ def _from_files():
 def _from_cli():
     try:
         out = subprocess.run(
-            ["claude", "agents", "--json"], capture_output=True, text=True,
-            cwd=HOME, timeout=20,
+            [system.program("claude"), "agents", "--json"], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", cwd=HOME, timeout=20, **system.HIDDEN,
         ).stdout
         return json.loads(out or "[]")
     except (subprocess.SubprocessError, ValueError, OSError):
@@ -105,7 +108,7 @@ def _status_since(row):
         return row["statusUpdatedAt"]
     path = os.path.join(SESSIONS_DIR, f"{row['pid']}.json")
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
         if data.get("sessionId") == row["sessionId"]:
             return data.get("statusUpdatedAt") or row.get("startedAt")
@@ -118,10 +121,11 @@ def status_of(pid, session_id):
     """(status, statusUpdatedAt) of one running session, read from its pid
     file; None when the process ended or the file holds another session."""
     try:
-        with open(os.path.join(SESSIONS_DIR, f"{pid}.json")) as f:
+        with open(os.path.join(SESSIONS_DIR, f"{pid}.json"), encoding="utf-8") as f:
             d = json.load(f)
-        os.kill(int(pid), 0)
     except (OSError, ValueError, TypeError):
+        return None
+    if not system.pid_alive(pid):
         return None
     if d.get("sessionId") != session_id:
         return None

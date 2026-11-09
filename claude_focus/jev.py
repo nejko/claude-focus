@@ -45,7 +45,7 @@ def credential(name):
     if key:
         return key
     try:
-        with open(CREDENTIALS) as f:
+        with open(CREDENTIALS, encoding="utf-8") as f:
             for line in f:
                 if line.startswith(name + "="):
                     return line.split("=", 1)[1].strip()
