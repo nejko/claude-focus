@@ -167,6 +167,8 @@ claude-focus show             # bring the focus screen to the front, or open one
 claude-focus pending ...      # from inside a session: wait for something external
 claude-focus restore          # iTerm2, after a crash: open the sessions of the last iTerm2 run again
 claude-focus reboot           # iTerm2, before a planned restart: save the layout, stop working sessions
+claude-focus search <words>   # past sessions with these words, and the command that resumes each
+claude-focus index            # bring the search over past sessions up to date (the service does it every minute)
 claude-focus cost             # scorer calls and spend per day
 claude-focus status           # which terminal, and is the service running?
 claude-focus uninstall        # undo setup
@@ -275,6 +277,7 @@ screen has the keys, its title bar is green (in a theme, the theme's color).
 | u | Unwait: end a snooze, a pending wait or a "done" mark |
 | p | Set a manual priority (0 = back to automatic) |
 | d | Done: nothing is needed now; the session comes back when it changes. On a to-do: your part is done |
+| x | Close the selected session: after y, claude-focus types `/exit` into its empty prompt. Only for a session whose turn has ended (not one that works, asks a question or waits for its background shells). Its conversation stays: a free terminal finds it again (see "Past sessions") |
 | r | Score the selected session again |
 | R | iTerm2: restore the windows of the last iTerm2 run (shown only when some are closed) |
 | t, T | Show the next theme, or the one before; Enter keeps it, Esc goes back (see "Themes") |
@@ -469,6 +472,34 @@ that does not exist yet.
 - Tab goes to the terminal without starting anything.
 - Esc goes back to the list of sessions.
 
+### Past sessions
+
+Below the folders, the picker lists the past sessions that match what you
+typed (two letters or more): by their name (`/rename`), the title Claude
+Code gave them, the last prompt and the folder, and by what was said in
+them, your messages and Claude's replies (not tool output). Sessions whose
+name, title or folder match come first, then those whose conversation does,
+each newest first, with the words found. Enter on one types
+`cd <folder> && claude --resume <id>` (after `new_session_command`) into the
+free terminal; a session that runs now is not started twice, Enter goes to
+its pane. When no folder matches, the first session is selected, not the
+new folder; ↑ reaches the new folder.
+
+So a session about one client can be closed (`x`, or `/exit` in it) and
+opened again later by typing the client's name or words from the
+conversation, with fewer terminals open meanwhile. `claude-focus search
+<words>` prints the same list with the command for each.
+
+The search reads an index, `~/.claude-focus/history.db` (SQLite, full-text
+search). The service updates it every minute in a process of its own, from
+what each transcript in `~/.claude/projects` gained since the last run (the
+first run read 28 GB of transcripts in about a minute and made an index of
+82 MB). Headless runs (`claude -p`, the Agent SDK) and the desktop app's
+sessions are left out: a terminal cannot resume them. Claude Code deletes
+transcripts older than `cleanupPeriodDays` (30 days by default, in
+`~/.claude/settings.json`), and the index forgets them with them; raise the
+setting to find older sessions.
+
 ## iTerm2
 
 claude-focus uses the [iTerm2](https://iterm2.com) Python API. Turn it on
@@ -656,6 +687,9 @@ All under `~/.claude-focus/` (mode 700):
   always the whole previous iTerm2 run).
 - `engine.json`, `engine.lock`, `service.pid`, `service.log`: which process
   is the engine.
+- `history.db`: the search over past sessions (see "Past sessions"): the
+  text of your messages and Claude's replies, copied from the transcripts.
+  Delete it at any time; the service builds it again.
 
 The jev keys live in `~/.config/claude-focus/credentials` (see "Scoring").
 
@@ -669,14 +703,17 @@ The jev keys live in `~/.config/claude-focus/credentials` (see "Scoring").
   and the last message also go to Anthropic through your Claude Code.
   claude-focus sends nothing else anywhere.
 - It types into your terminals only for wake-up messages (only into an
-  empty prompt), the command of a new session that you start from the
-  folder list, and in iTerm2 the restore commands, Esc on `reboot` and the
+  empty prompt), `/exit` when you close a session with `x` (only into an
+  empty prompt), the command of a new or resumed session that you start
+  from the folder list, and in iTerm2 the restore commands, Esc on `reboot` and the
   profile escape sequence. In herdr it also sets the sidebar tokens, which
   stay inside herdr.
 - The background service runs your check commands with your shell and your
   PATH.
 - It reads `~/.claude/sessions/`, the transcripts in `~/.claude/projects/`
-  and the list of folders in `~/.claude.json`, and never writes them.
+  and the list of folders in `~/.claude.json`, and never writes them. The
+  search over past sessions keeps a copy of their messages in
+  `~/.claude-focus/history.db`, on this Mac only.
 
 ## How it works
 

@@ -16,7 +16,7 @@ import tty as ttymod
 from . import costs, folders, look
 from . import pending as pend
 from . import queue as q
-from . import restore, scorer, sessions as sessions_mod, store, terminal, themes, watch
+from . import history, restore, scorer, sessions as sessions_mod, store, terminal, themes, watch
 from .look import B, R, bg, fg, fit, mix, width
 from .screen import EMPTY
 from .terminal import SHELLS
@@ -157,7 +157,7 @@ class App:
         self.score_failed = {}    # state key -> time of its last failed score (SCORE_RETRY_S)
         self.checking = set()     # session ids whose pending check runs now
         self.sem = asyncio.Semaphore(self.cfg["scorer_parallel"])
-        self.mode = "main"        # main | snooze | snooze_time | priority | restore | folders
+        self.mode = "main"        # main | snooze | snooze_time | priority | restore | folders | close
         self.buf = ""
         self.msg = ""
         self.msg_until = 0
@@ -189,6 +189,11 @@ class App:
         self.folders = []         # its folders (see folders.candidates)
         self.matches = []         # the folders that match what the user typed (self.buf)
         self.new_folder = None    # the folder it can create from what the user typed (folders.new_folder)
+        self.hits = []            # the past sessions that match it (history.search), below the folders
+        self.hit_seq = 0          # the newest search: an older one that ends later is dropped
+        self.closing = None       # the session that x asks to close (mode "close")
+        self.index_proc = None    # `claude-focus index` while it runs (the engine starts it, _index_tick)
+        self.index_at = 0         # Unix s when it last started
 
     # ---- data -------------------------------------------------------------
 
@@ -233,6 +238,7 @@ class App:
         self.view["terminals"] = self.terminals
         if self.engine:
             self._schedule_scores(state)
+            await self._index_tick()
             self._write_status()
             if self.cfg["herdr_sidebar"] and self.bridge.sidebar:
                 await self.bridge.report(self._marks())
@@ -281,6 +287,29 @@ class App:
             self.cfg["hotkey_go"]: self.go_top,
             self.cfg["hotkey_focus_window"]: self.show_focus_window,
         })))
+
+    async def _index_tick(self):
+        """Keep the search over past sessions current (history.py): every
+        INDEX_SECONDS the engine runs `claude-focus index` in a process of its
+        own at a low priority, so reading the transcripts never holds up a
+        poll. The first run reads all of them (28 GB in 66 s, 2026-11-09)."""
+        proc = self.index_proc
+        if proc and proc.returncode is None:
+            return
+        if proc and proc.returncode:
+            err = (await proc.stderr.read()).decode(errors="replace").strip()
+            store.log(f"index failed ({proc.returncode}): {err[-300:]}")
+        self.index_proc = None
+        if time.time() - self.index_at < history.INDEX_SECONDS:
+            return
+        self.index_at = time.time()
+        try:
+            self.index_proc = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "claude_focus", "index", stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+                preexec_fn=lambda: os.nice(10))
+        except OSError as ex:
+            store.log(f"index not started: {ex!r}")
 
     def _write_status(self):
         status = {"pid": os.getpid(), "mode": "service" if self.headless else "window",
@@ -748,19 +777,68 @@ class App:
             return
         self.folders = await asyncio.get_event_loop().run_in_executor(
             None, folders.candidates, self.cfg["project_roots"])
-        self.pick, self.mode, self.buf = {"term": item, "sel": 0}, "folders", ""
+        self.pick, self.mode, self.buf, self.hits = {"term": item, "sel": 0}, "folders", "", []
         self._search()
 
     def _search(self):
         """The matching folders, then (one row more, selected when nothing
-        matches) the new folder that what the user typed would make."""
+        matches) the new folder that what the user typed would make, then the
+        past sessions that match it (_search_sessions, when it ends)."""
         self.matches = folders.search(self.folders, self.buf, short_path)
         self.new_folder = folders.new_folder(self.buf, self.cfg["project_roots"])
         self.pick["sel"] = 0
+        self.hits = []
+        self.hit_seq += 1
+        if len(self.buf.strip()) >= 2:
+            asyncio.ensure_future(self._search_sessions(self.buf, self.hit_seq))
+
+    async def _search_sessions(self, query, seq):
+        """The past sessions that match what the user typed (history.search,
+        up to about 0.3 s), unless they typed on meanwhile."""
+        try:
+            hits = await asyncio.get_event_loop().run_in_executor(None, history.search, query)
+        except Exception as ex:  # a broken index must not break the picker
+            store.log(f"session search error: {ex!r}")
+            return
+        if seq == self.hit_seq and self.mode == "folders":
+            self.hits = hits
+            # No folder matches: the first past session is selected, not the
+            # new folder, so Enter after words from a session never makes a
+            # folder of them. ↑ reaches the new folder.
+            if hits and not self.matches and self.pick["sel"] == 0:
+                self.pick["sel"] = bool(self.new_folder)
+            self.wake.set()
+
+    def _picker_rows(self):
+        """How many rows the picker can select: folders, the new folder, sessions."""
+        return len(self.matches) + bool(self.new_folder) + len(self.hits)
 
     def _creating(self):
         """True while the picker's selection is the new-folder row."""
         return bool(self.new_folder) and self.pick["sel"] == len(self.matches)
+
+    def _hit(self):
+        """The selected past session, or None while a folder is selected."""
+        n = self.pick["sel"] - len(self.matches) - bool(self.new_folder)
+        return self.hits[n] if 0 <= n < len(self.hits) else None
+
+    async def resume_hit(self, term, hit):
+        """Enter on a past session: resume it in the free terminal
+        (`cd <folder> && claude --resume <id>`). One that runs now is not
+        started twice: Enter goes to its pane."""
+        running = next((s for s in self.sessions if s["sessionId"] == hit["session"]), None)
+        if running:
+            pane = self.pane_of(running)
+            if pane and await self.bridge.go(pane, zoom=self.cfg["zoom"]):
+                self.mode, self.sel = "main", None
+            else:
+                self.flash(f"{hit['label']} runs now, without a {self.bridge.label} pane.")
+            return
+        if not os.path.isdir(hit["cwd"]):
+            self.flash(f"Its folder is gone: {short_path(hit['cwd'])}.")
+            return
+        self.mode = "main"
+        await self.start_session(term, hit["cwd"], flags=f" --resume {hit['session']}")
 
     async def choose_start(self, term, path):
         """A folder is picked. Where Claude Code ran before, ask how to start
@@ -834,6 +912,30 @@ class App:
     def set_priority(self, value):
         self._update_selected(lambda st, e, s: e.__setitem__("manual_priority", value or None),
                               "{name}: priority " + str(value or "back to automatic") + ".")
+
+    def ask_close(self, item):
+        """x: ask whether to end the selected session (close_session)."""
+        s = item["s"]
+        why = ("it is working; close it when its turn has ended" if s["status"] == "busy" else
+               "it asks you a question; answer it first" if s["status"] == "waiting" else
+               "its background shells still run" if s["status"] == "shell" else
+               f"it has no {self.bridge.label} pane" if not self.pane_of(s) else None)
+        if why:
+            self.flash(f"{s.get('name')}: not closed, {why}.")
+            return
+        self.closing, self.mode = s, "close"
+
+    async def close_session(self, s):
+        """x, then y: end a session by typing /exit into its prompt. Its
+        conversation stays: a free terminal's picker finds it again by words
+        from it (history.py) and resumes it. Only into an empty prompt, never
+        over a draft (bridge.send_prompt)."""
+        ok, why = await self.bridge.send_prompt(self.pane_of(s), "/exit")
+        if not ok:
+            self.flash(f"{s.get('name')}: not closed, {why}.")
+            return
+        store.log(f"closed {s.get('name')} with /exit")
+        self.flash(f"Closed {s.get('name')}. To open it again, Enter on a free terminal and type words from it.", 10)
 
     def dismiss(self):
         sec, item = self.selected()
@@ -922,8 +1024,10 @@ class App:
                 await self.pick_folder()
             elif key in ("t", "T"):
                 self.theme_step(1 if key == "t" else -1)
-            elif sec == "terminals" and key in ("s", "p", "d", "u", "r"):
+            elif sec == "terminals" and key in ("s", "p", "d", "u", "r", "x"):
                 self.flash("A free terminal: Enter starts a new session in it.")
+            elif key == "x" and item:
+                self.ask_close(item)
             elif key == "s" and item:
                 if sec == "working":
                     self.flash("It is working now; nothing to snooze.")
@@ -947,6 +1051,10 @@ class App:
                     self.flash("Nothing to restore: no session of the last iTerm2 run is closed.")
             elif key == "q":
                 raise SystemExit
+        elif self.mode == "close":
+            s, self.closing, self.mode = self.closing, None, "main"
+            if key == "y" and s:
+                await self.close_session(s)
         elif self.mode == "restore":
             if key == "y":
                 p = self.restore_plan()
@@ -993,13 +1101,15 @@ class App:
                 self.buf += key
         elif self.mode == "folders":
             # Every letter goes into the search, n and q too; only Esc leaves.
-            term, n = self.pick["term"], len(self.matches) + bool(self.new_folder)
+            term, n = self.pick["term"], self._picker_rows()
             if key == "\x1b":
                 self.mode = "main"
             elif key in ("\x1b[A", "\x1bOA", "\x1b[B", "\x1bOB") and n:
                 self.pick["sel"] = (self.pick["sel"] + (-1 if key[-1] == "A" else 1)) % n
             elif key in ("\r", "\n") and n:
-                if self._creating():
+                if self._hit():
+                    await self.resume_hit(term, self._hit())
+                elif self._creating():
                     self.mode = "main"
                     await self.start_session(term, self.new_folder, create=True)
                 else:
@@ -1205,7 +1315,8 @@ class App:
         P, acc, term = self.pal, self.pal["terminals"], self.pick["term"]
         dim = fg(P["dim"])
         lines = [self.section_title("terminals", f"NEW SESSION IN {term['tty']}", len(self.matches), w)]
-        hint = "" if self.buf else f"   {dim}type to search: a folder name, its first letters, or a new name{R}"
+        hint = "" if self.buf else (f"   {dim}type to search: a folder name, its first letters, a new name, "
+                                    f"or words from a past session{R}")
         lines.append(f"  {fg(acc)}{B}›{R} {fg(P['text'])}{self.buf}{R}{fg(acc)}█{R}{hint}")
         new = []
         if self.new_folder:
@@ -1213,9 +1324,11 @@ class App:
             line = (f"{fg(acc)}{P.get('marker', '▌')}{R} " if on else "  ") + f"{fg(acc)}{B}+ new folder{R} " \
                 f"{fg(P['text'] if on else P['soft'])}{look.cut_left(short_path(self.new_folder), w - 20)}{R}"
             new = [self._on(line, acc, w) if on else line]
+        new += self._hit_lines(w, max(3, (room - len(lines) - len(new)) // 2))
         if not self.matches:
             return lines + [f"  {dim}No folder matches.{R}"] + new
-        sel = min(self.pick["sel"], len(self.matches) - 1)
+        sel = self.pick["sel"] if self.pick["sel"] < len(self.matches) else \
+            len(self.matches) - 1 if self._creating() else 0  # a past session selected: the folders from the top
         show = max(1, room - len(lines) - len(new))
         start = sel - show + 1 if sel >= show else 0
         shown = self.matches[start:start + show]
@@ -1232,6 +1345,33 @@ class App:
                 + f"  {dim}{age}{R}"
             lines.append(self._on(line, acc, w) if selected else line)
         return lines + new
+
+    def _hit_lines(self, w, room):
+        """Below the folders: the past sessions that match what the user typed,
+        each with its name or title, folder, last activity and the words found
+        in it. At most room rows; the list scrolls to keep the selection in view."""
+        if not self.hits:
+            return []
+        P, acc = self.pal, self.pal["terminals"]
+        dim = fg(P["dim"])
+        hit = self._hit()
+        sel = self.hits.index(hit) if hit else 0
+        show = max(1, room - 1)
+        start = sel - show + 1 if sel >= show else 0
+        lines = [f"  {dim}past sessions: Enter resumes one here{R}"]
+        lw = min(36, max(len(h["label"]) for h in self.hits))
+        for h in self.hits[start:start + show]:
+            on = h is hit
+            tone = fg(P["text"] if on else P["soft"])
+            snip = (h["snippet"] or "").replace("\x01", f"{R}{fg(acc)}{B}").replace("\x02", f"{R}{dim}")
+            line = ((f"{fg(acc)}{P.get('marker', '▌')}{R} " if on else "  ")
+                    + look.pad(f"{tone}{look.cut(h['label'], lw)}{R}", lw)
+                    + f"  {dim}{look.pad(look.cut_left(short_path(h['cwd']), 28), 28)}  "
+                      f"{look.pad(ago(h['last_at']), 9)}{R}"
+                    + (f"  {dim}{snip}{R}" if snip else ""))
+            line = fit(line, w)
+            lines.append(self._on(line, acc, w) if on else line)
+        return lines
 
     def _start_lines(self, w):
         """The step after the folder picker, in a folder where Claude Code ran
@@ -1353,6 +1493,11 @@ class App:
         if self.mode == "restore":
             return "  " + self._sep().join([self._key("y", "open them"), self._key("n", "no, do not offer this layout again"),
                                      self._key("esc", "back")])
+        if self.mode == "close":
+            name = (self.closing or {}).get("name") or "this session"
+            return (f"  {fg(P['need'])}{B}Close {name} with /exit?{R} {fg(P['dim'])}Its conversation stays: "
+                    f"a free terminal finds it again.{R}   " + self._sep().join(
+                        [self._key("y", "close it"), self._key("esc", "cancel")]))
         if self.mode == "snooze":
             opts = [self._key(k, label) for k, label, _ in q.snooze_presets(now)]
             return (f"  {fg(P['pending'])}{B}Snooze until{R}   " + self._sep().join(
@@ -1374,15 +1519,18 @@ class App:
                                      self._key("tab", "just go to the terminal"), self._key("esc", "back to the folders")])
         if self.mode == "folders":
             match = self.matches[self.pick["sel"]] if self.pick["sel"] < len(self.matches) else None
-            what = (f"make it, cd there and run {self.cfg['new_session_command']}" if self._creating() else
+            hit = self._hit()
+            running = hit and any(s["sessionId"] == hit["session"] for s in self.sessions)
+            what = ("go to it: it runs now" if running else "resume this session here" if hit else
+                    f"make it, cd there and run {self.cfg['new_session_command']}" if self._creating() else
                     "start there: new, continue or resume" if match and match[2] else
                     f"cd there and run {self.cfg['new_session_command']}")
             return "  " + self._sep().join([self._key("⏎", what),
                                      self._key("↑↓", "select"), self._key("tab", "just go to the terminal"),
                                      self._key("esc", "cancel")])
         keys = [("⏎", "go"), ("↑↓", "select"), ("esc", "top"), ("n", "new session"), ("s", "snooze"),
-                ("u", "unwait"), ("p", "priority"), ("d", "done"), ("r", "rescore"), ("t", "theme"),
-                ("q", "quit")]
+                ("u", "unwait"), ("p", "priority"), ("d", "done"), ("x", "close"), ("r", "rescore"),
+                ("t", "theme"), ("q", "quit")]
         if self.cfg.get("hotkeys"):
             hk = self.cfg["hotkey_go"].replace("ctrl", "⌃").replace("option", "⌥").replace("+", "").upper()
             keys.insert(3, (hk, "go to top"))

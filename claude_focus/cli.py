@@ -1,6 +1,7 @@
 """Entry point. `claude-focus` opens the focus screen; `claude-focus list`
 prints the queue once (it scores sessions that have no fresh score first)."""
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -412,6 +413,24 @@ def cmd_service_status():
             print(line.strip())
 
 
+def cmd_search(query):
+    """Past sessions that match the words (history.search), each with the
+    command that resumes it."""
+    from . import history
+    from .app import ago, short_path
+    if not os.path.exists(history.DB):
+        sys.exit("claude-focus search: no index yet. The service builds it within a minute "
+                 "(or run `claude-focus index`).")
+    hits = history.search(query)
+    if not hits:
+        print(f"No past session matches {query!r}.")
+    for h in hits:
+        print(f"{h['label']}  ({short_path(h['cwd'])}, {ago(h['last_at'])})")
+        if h["snippet"]:
+            print("    " + h["snippet"].replace("\x01", "").replace("\x02", "")[:160])
+        print(f"    cd {shlex.quote(h['cwd'])} && claude --resume {h['session']}")
+
+
 def main():
     args = sys.argv[1:]
     if not args:
@@ -445,6 +464,11 @@ def main():
     elif args[0] == "cost":
         from . import costs
         print(costs.report())
+    elif args[0] == "index" and len(args) == 1:
+        from . import history
+        history.sync()
+    elif args[0] == "search" and len(args) > 1:
+        cmd_search(" ".join(args[1:]))
     elif args[0] == "setup" and set(args[1:]) <= {"--yes", "--dry-run"}:
         from . import setup
         setup.Setup(yes="--yes" in args, dry_run="--dry-run" in args).run()
@@ -453,6 +477,6 @@ def main():
         setup.uninstall(purge="--purge" in args)
     else:
         print("usage: claude-focus [setup [--yes] [--dry-run] | uninstall [--purge] | list | go | show | "
-              "pending --help | restore [--dry-run] | reboot [--dry-run] | cost | status | install-daemon | "
-              "uninstall-daemon | --version]")
+              "pending --help | search <words> | index | restore [--dry-run] | reboot [--dry-run] | cost | "
+              "status | install-daemon | uninstall-daemon | --version]")
         sys.exit(2)
