@@ -403,6 +403,12 @@ def cmd_uninstall_daemon():
 
 
 def cmd_service_status():
+    from . import __version__, update
+    kind = update.install_kind()
+    print(f"claude-focus {__version__} ({'a git checkout' if kind == 'checkout' else kind})")
+    newer = update.available(store.load_state(), kind)
+    if newer:
+        print(f"claude-focus {newer} is out: claude-focus update")
     print(f"terminal: {terminal.describe(terminal.detect())}")
     r = _launchctl("print", f"gui/{os.getuid()}/{LABEL}")
     if r.returncode != 0:
@@ -467,6 +473,11 @@ def main():
     elif args[0] == "index" and len(args) == 1:
         from . import history
         history.run()
+    elif args[0] == "update" and len(args) == 1:
+        from . import update
+        ok, text = update.run()
+        print(text)
+        sys.exit(0 if ok else 1)
     elif args[0] == "search" and len(args) > 1:
         cmd_search(" ".join(args[1:]))
     elif args[0] == "setup" and set(args[1:]) <= {"--yes", "--dry-run"}:
@@ -477,6 +488,6 @@ def main():
         setup.uninstall(purge="--purge" in args)
     else:
         print("usage: claude-focus [setup [--yes] [--dry-run] | uninstall [--purge] | list | go | show | "
-              "pending --help | search <words> | index | restore [--dry-run] | reboot [--dry-run] | cost | "
+              "pending --help | search <words> | index | update | restore [--dry-run] | reboot [--dry-run] | cost | "
               "status | install-daemon | uninstall-daemon | --version]")
         sys.exit(2)

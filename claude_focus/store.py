@@ -23,6 +23,7 @@ DEFAULT_CONFIG = {
     "scorer_model": "claude-sonnet-5-5",  # used only when scorer is "claude"
     "ask_model": "claude-haiku-5-5",    # with jev: writes the one-line request ("" = only ask.extract)
     "history_model": "claude-haiku-5-5",  # describes past sessions for the picker's search ("" = no descriptions)
+    "check_updates": True,              # look on PyPI once a day for a new version (U installs it)
     "confirm_close": True,              # x asks y before it types /exit into the session (false: x closes at once)
     "scorer_parallel": 4,
     "poll_seconds": 3,

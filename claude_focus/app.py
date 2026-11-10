@@ -16,7 +16,7 @@ import tty as ttymod
 from . import costs, folders, look
 from . import pending as pend
 from . import queue as q
-from . import history, restore, scorer, sessions as sessions_mod, store, terminal, themes, watch
+from . import __version__, history, restore, scorer, sessions as sessions_mod, store, terminal, themes, update, watch
 from .look import B, R, bg, fg, fit, mix, width
 from .screen import EMPTY
 from .terminal import SHELLS
@@ -216,6 +216,9 @@ class App:
         self.closing = None       # the session that x asks to close (mode "close")
         self.index_proc = None    # `claude-focus index` while it runs (the engine starts it, _index_tick)
         self.index_at = 0         # Unix s when it last started
+        self.update_v = None      # a newer version on PyPI that U installs (update.available)
+        self.update_checking = False
+        self.install = update.install_kind()  # how this copy was installed; a checkout is never updated
 
     # ---- data -------------------------------------------------------------
 
@@ -250,7 +253,12 @@ class App:
             await self.pending_tick(store.load_state())
         state = store.load_state()
         self.restore_handled = state.get("restore_handled")
+        self.update_v = update.available(state, self.install)
         if self.engine:
+            if self.cfg["check_updates"] and self.install != "checkout" and update.due(state) \
+                    and not self.update_checking:
+                self.update_checking = True
+                asyncio.ensure_future(self._update_check())
             self._reset_skips(state)
             self._take_rescore_requests(state)
             await self.retry_wakeups(state)
@@ -309,6 +317,25 @@ class App:
             self.cfg["hotkey_go"]: self.go_top,
             self.cfg["hotkey_focus_window"]: self.show_focus_window,
         })))
+
+    async def _update_check(self):
+        """Once a day, the engine asks PyPI for the newest version (update.py)."""
+        try:
+            await asyncio.get_event_loop().run_in_executor(None, update.check)
+        except Exception as ex:  # never let it break the poll
+            store.log(f"update check error: {ex!r}")
+        finally:
+            self.update_checking = False
+
+    async def run_update(self):
+        """U: install the new version (update.run), then say what to do."""
+        if not self.update_v:
+            self.flash(f"claude-focus {__version__} is the newest version.")
+            return
+        self.flash(f"Updating claude-focus to {self.update_v}…", 600)
+        ok, text = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: update.run(say=lambda t: store.log("update: " + t)))
+        self.flash(("Updated: " if ok else "Not updated: ") + text, 20)
 
     async def _index_tick(self):
         """Keep the search over past sessions current (history.py): every
@@ -1078,6 +1105,8 @@ class App:
                     self.flash(f"{self.bridge.label} keeps its own layout and sessions: nothing to restore here.")
                 else:
                     self.flash("Nothing to restore: no session of the last iTerm2 run is closed.")
+            elif key == "U":
+                await self.run_update()
             elif key == "q":
                 raise SystemExit
         elif self.mode == "close":
@@ -1468,6 +1497,9 @@ class App:
         top_lines = [self._title_line(v, w, now)]
         if self.scorer_error():
             top_lines.append(f"  {fg(P['alert'])}Scorer error: {self.scorer_error()}{R}")
+        if self.update_v:
+            top_lines.append(f"  {fg(P['todo'])}claude-focus {self.update_v} is out (this is {__version__}): "
+                             f"{B}U{R}{fg(P['todo'])} installs it{R}")
         plan = self.restore_plan() if self.mode == "main" else None
         if plan:
             n = sum(len(x["panes"]) for x in plan[0])
@@ -1595,6 +1627,8 @@ class App:
         keys = [("⏎", "go"), ("↑↓", "select"), ("esc", "top"), ("n", "new session"), ("s", "snooze"),
                 ("u", "unwait"), ("p", "priority"), ("d", "done"), ("x", "close"), ("r", "rescore"),
                 ("t", "theme"), ("q", "quit")]
+        if self.update_v:
+            keys.insert(-1, ("U", f"update to {self.update_v}"))
         if self.cfg.get("hotkeys"):
             hk = self.cfg["hotkey_go"].replace("ctrl", "⌃").replace("option", "⌥").replace("+", "").upper()
             keys.insert(3, (hk, "go to top"))

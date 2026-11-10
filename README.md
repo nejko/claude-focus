@@ -139,7 +139,20 @@ to say what matters to you.
 
 ### Upgrade
 
-`brew upgrade claude-focus && claude-focus setup`, or with uv
+The service looks on PyPI once a day for a new version. When one is out,
+the focus screen says so under its title, and `U` installs it the way you
+installed claude-focus (`brew upgrade claude-focus`, `uv tool upgrade
+claude-focus` or `pipx upgrade claude-focus`), then runs `claude-focus setup
+--yes`, which restarts the service on the new code; quit the focus screen
+(`q`) and open it again for the new version there too. Nothing updates by
+itself. `claude-focus update` does the same from a terminal, and
+`claude-focus status` says which version runs and whether a newer one is
+out. The Homebrew formula follows a PyPI release a little later; until it
+does, `U` says that brew has nothing newer yet. A copy that runs from a git
+checkout is never offered an update. `"check_updates": false` turns the
+daily look off.
+
+By hand: `brew upgrade claude-focus && claude-focus setup`, or with uv
 `uv tool upgrade claude-focus && claude-focus setup` (setup restarts the
 service on the new code).
 
@@ -169,6 +182,7 @@ claude-focus restore          # iTerm2, after a crash: open the sessions of the 
 claude-focus reboot           # iTerm2, before a planned restart: save the layout, stop working sessions
 claude-focus search <words>   # past sessions with these words, and the command that resumes each
 claude-focus index            # bring the search over past sessions up to date (the service does it every minute)
+claude-focus update           # install a newer version, the way this one was installed (see "Upgrade")
 claude-focus cost             # scorer calls and spend per day
 claude-focus status           # which terminal, and is the service running?
 claude-focus uninstall        # undo setup
@@ -281,6 +295,7 @@ screen has the keys, its title bar is green (in a theme, the theme's color).
 | r | Score the selected session again |
 | R | iTerm2: restore the windows of the last iTerm2 run (shown only when some are closed) |
 | t, T | Show the next theme, or the one before; Enter keeps it, Esc goes back (see "Themes") |
+| U | When the screen says a new version is out: install it (see "Upgrade") |
 | q | Quit |
 
 From anywhere: in iTerm2, two optional global hotkeys (`"hotkeys": true` in
@@ -675,6 +690,7 @@ remote machine show without a pane.
 | `ask_model` | `"claude-haiku-5-5"` | With jev: the model that writes the one-line request (`""` = off) |
 | `history_model` | `"claude-haiku-5-5"` | The model that describes past sessions for the search (`""` = off; see "Past sessions") |
 | `confirm_close` | `true` | `x` asks y before it closes a session; `false` closes it at once |
+| `check_updates` | `true` | Look on PyPI once a day for a new version (see "Upgrade") |
 | `scorer_parallel` | `4` | Sessions scored at the same time |
 | `poll_seconds` | `3` | How often the state is read at the latest; a change of a session's status is read at once |
 | `aging_points_per_hour`, `aging_max` | `0.15`, `10` | The bonus for waiting, added to the score; the sum stays at most 100, and at 100 the longer wait goes first |
@@ -722,6 +738,8 @@ The jev keys live in `~/.config/claude-focus/credentials` (see "Scoring").
   and the last message also go to Anthropic through your Claude Code.
 - For a description of a past session (`history_model`), its names, first
   message and last six messages go to Anthropic through your Claude Code.
+- Once a day it asks PyPI for the newest version of claude-focus (a plain
+  request that carries nothing about you; `check_updates`).
   claude-focus sends nothing else anywhere.
 - It types into your terminals only for wake-up messages (only into an
   empty prompt), `/exit` when you close a session with `x` (only into an
