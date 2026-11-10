@@ -258,14 +258,14 @@ class PickerTest(unittest.TestCase):
         self.app.hits = [hit(n, "named") for n in range(3)] + [hit(n, "talk") for n in range(3, 9)]
         self.app.pick["sel"] = 1 + 7  # after the one folder: the eighth session, in the second group
         text = [re.sub(r"\x1b\[[0-9;]*m", "", x) for x in self.app._hit_lines(120, 8)]
-        self.assertEqual(text[0].strip(), "past sessions: Enter resumes one here")
+        self.assertIn("PAST SESSIONS  9", text[0])
         self.assertTrue(text[1].strip().startswith("↑ "))
-        self.assertIn("FOUND IN THE CONVERSATION (6)", "".join(text))
+        self.assertIn("found in the conversation 6", "".join(text))
         self.assertTrue(any("label 7" in x and x.startswith("▌") for x in text))  # the selection is in view
         self.assertEqual(text[-1].strip(), "↓ 1 more")
         self.app.pick["sel"] = 1
         text = [re.sub(r"\x1b\[[0-9;]*m", "", x) for x in self.app._hit_lines(120, 30)]
-        self.assertIn("NAME, DESCRIPTION OR FOLDER (3)", text[1])
+        self.assertIn("in the name, description or folder 3", text[1])
         self.assertNotIn("more", "".join(text))
 
     def test_enter_resumes_it_in_the_free_terminal(self):

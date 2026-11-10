@@ -82,6 +82,18 @@ def ago(t):
     return "now" if time.time() - t < 60 else f"{fmt_wait((time.time() - t) / 3600)} ago"
 
 
+def marked(text, words, tone, match):
+    """Plain text in tone, every place where one of the words (lower case)
+    occurs in match."""
+    low, on = text.lower(), set()
+    for w in words:
+        i = low.find(w)
+        while i >= 0:
+            on.update(range(i, i + len(w)))
+            i = low.find(w, i + len(w))
+    return "".join(f"{match if i in on else tone}{c}{R}" for i, c in enumerate(text))
+
+
 def short_path(path):
     home = os.path.expanduser("~")
     return "~" + path[len(home):] if path == home or (path or "").startswith(home + "/") else path or "?"
@@ -1340,9 +1352,9 @@ class App:
             text = look.cut_left(text, pw)
             hit, tone = folders.marks(text, self.buf), fg(P["text"] if selected else P["soft"])
             body = "".join(f"{fg(acc)}{B}{c}{R}" if i in hit else f"{tone}{c}{R}" for i, c in enumerate(text))
-            age = ago(when) if used else "no recent session"
+            age = f"{dim}{ago(when)}{R}" if used else f"{fg(P['faint'])}no recent session{R}"
             line = (f"{fg(acc)}{P.get('marker', '▌')}{R} " if selected else "  ") + look.pad(body, pw) \
-                + f"  {dim}{age}{R}"
+                + f"  {age}"
             lines.append(self._on(line, acc, w) if selected else line)
         return lines + new
 
@@ -1356,15 +1368,18 @@ class App:
         above and below it."""
         if not self.hits:
             return []
-        P, acc = self.pal, self.pal["terminals"]
-        dim = fg(P["dim"])
+        # The sessions in the to-do color, apart from the green folders; what
+        # matched the typed words in green, as in the folders above.
+        P, acc, sacc = self.pal, self.pal["terminals"], self.pal["todo"]
+        dim, soft, faint, match = fg(P["dim"]), fg(P["soft"]), fg(P["faint"]), fg(acc) + B
+        words = [x for x in self.buf.lower().split() if x]
         hit = self._hit()
-        heads = {"named": "NAME, DESCRIPTION OR FOLDER", "talk": "FOUND IN THE CONVERSATION"}
+        heads = {"named": "in the name, description or folder", "talk": "found in the conversation"}
         items = []  # a group heading (its text) or a session (its dict), in screen order
         for group, title in heads.items():
             found = [h for h in self.hits if h.get("group", "named") == group]
             if found:
-                items += [f"  {dim}{B}{title}{R} {dim}({len(found)}){R}"] + found
+                items += [f"  {fg(sacc)}{B}{title}{R} {faint}{len(found)}{R}"] + found
         at = next((n for n, x in enumerate(items) if x is hit), 0)
         show = max(1, room - 1)
         if len(items) > show:
@@ -1378,28 +1393,31 @@ class App:
         above = sum(1 for x in items[:start] if isinstance(x, dict))
         below = sum(1 for x in items[end:] if isinstance(x, dict))
         visible = ([sticky] if sticky else []) + items[start:end]
-        lines = [f"  {dim}past sessions: Enter resumes one here{R}"]
+        lines = [self.section_title("todo", "PAST SESSIONS", len(self.hits), w)]
         if above:
-            lines.append(f"    {dim}↑ {above} more{R}")
+            lines.append(f"    {faint}↑ {above} more{R}")
         lw = min(max(30, w // 2 - 24), max(len(h["label"]) for h in self.hits))
+        now = time.time()
         for h in visible:
             if isinstance(h, str):
                 lines.append(h)
                 continue
             on = h is hit
-            tone = fg(P["text"] if on else P["soft"])
-            snip = (h["snippet"] or "").replace("\x01", f"{R}{fg(acc)}{B}").replace("\x02", f"{R}{dim}")
+            path = look.cut_left(short_path(h["cwd"]), 24)
+            head, _, name = path.rpartition("/")
+            where = (f"{dim}{head}/{R}" if head else "") + f"{soft}{name}{R}"  # the folder's own name brighter
+            when = f"{soft if now - (h['last_at'] or 0) < 86400 else dim}{ago(h['last_at'] or 0)}{R}"
+            snip = (h["snippet"] or "").replace("\x01", f"{R}{match}").replace("\x02", f"{R}{dim}")
+            snip = f"{dim}{snip}{R}" if snip else ""
             if not snip and h.get("last") and h["last"] not in h["label"]:
-                snip = "last prompt: " + h["last"]
-            line = ((f"{fg(acc)}{P.get('marker', '▌')}{R} " if on else "  ")
-                    + look.pad(f"{tone}{look.cut(h['label'], lw)}{R}", lw)
-                    + f"  {dim}{look.pad(look.cut_left(short_path(h['cwd']), 24), 24)}  "
-                      f"{look.pad(ago(h['last_at']), 9)}{R}"
-                    + (f"  {dim}{snip}{R}" if snip else ""))
+                snip = f"{faint}last prompt:{R} {dim}{h['last']}{R}"
+            line = ((f"{fg(sacc)}{P.get('marker', '▌')}{R} " if on else "  ")
+                    + look.pad(marked(look.cut(h["label"], lw), words, fg(P["text"]), match), lw)
+                    + "  " + look.pad(where, 24) + "  " + look.pad(when, 9) + (f"  {snip}" if snip else ""))
             line = fit(line, w)
-            lines.append(self._on(line, acc, w) if on else line)
+            lines.append(self._on(line, sacc, w) if on else line)
         if below:
-            lines.append(f"    {dim}↓ {below} more{R}")
+            lines.append(f"    {faint}↓ {below} more{R}")
         return lines
 
     def _start_lines(self, w):
