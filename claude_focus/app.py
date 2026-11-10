@@ -49,6 +49,25 @@ KIND_LABEL = {"decision": "decision", "action": "action", "login": "login",
 # after the folder picker): key, label, what follows new_session_command.
 START_KINDS = [("n", "New session", ""), ("c", "Continue the last session", " --continue"),
                ("r", "Resume an earlier session", " --resume")]  # --resume: Claude Code's own list
+# The settings that i shows and changes (config.json), in this order: key,
+# its kind (bool, str, a list of choices where "" is off, or "themes"), and
+# what it does. The rest of the config is for the file (README, Configuration).
+SETTINGS = [
+    ("user_name", str, "how sessions and the scorer call you"),
+    ("confirm_close", bool, "x asks y before it closes a session"),
+    ("return_after_answer", bool, "back here after you answer a session's question"),
+    ("zoom", bool, "Enter maximizes the session's pane"),
+    ("auto_profiles", bool, "iTerm2: free terminals turn green, and back, by themselves"),
+    ("hotkeys", bool, "iTerm2: global keys ⌃⌥N and ⌃⌥F (when this screen opens again)"),
+    ("scorer", ["jev", "claude"], "who scores the sessions (jev needs a TypeSafe or OpenRouter key)"),
+    ("ask_model", ["claude-haiku-5-5", ""], "with jev: the model that writes the one-line request"),
+    ("history_model", ["claude-haiku-5-5", ""], "the model that describes past sessions for the search"),
+    ("check_updates", bool, "look on PyPI once a day for a new version"),
+    ("claude_md_notice", bool, "tell a session when ~/.claude/CLAUDE.md changed"),
+    ("wake_check_output", bool, "put a check's output into its wake-up message"),
+    ("new_session_command", str, "what a new session from a free terminal runs"),
+    ("theme", "themes", "the look of this screen (t and T try them)"),
+]
 SECTIONS = [("need", "NEED YOU"), ("todo", "YOUR TO-DOS"), ("pending", "PENDING"),
             ("working", "WORKING"), ("free", "FREE"), ("terminals", "AVAILABLE TERMINALS")]
 COUNT_LABEL = {"need": "need you", "todo": "to-do", "pending": "pending", "working": "working",
@@ -179,7 +198,7 @@ class App:
         self.score_failed = {}    # state key -> time of its last failed score (SCORE_RETRY_S)
         self.checking = set()     # session ids whose pending check runs now
         self.sem = asyncio.Semaphore(self.cfg["scorer_parallel"])
-        self.mode = "main"        # main | snooze | snooze_time | priority | restore | folders | close
+        self.mode = "main"        # main | snooze | snooze_time | priority | restore | folders | close | settings
         self.buf = ""
         self.msg = ""
         self.msg_until = 0
@@ -219,10 +238,18 @@ class App:
         self.update_v = None      # a newer version on PyPI that U installs (update.available)
         self.update_checking = False
         self.install = update.install_kind()  # how this copy was installed; a checkout is never updated
+        self.cfg_mtime = store.config_mtime()  # of the config that self.cfg was read from (poll reads it again)
+        self.set_sel, self.set_edit = 0, False  # the settings screen (i): its selected row, typing a value
 
     # ---- data -------------------------------------------------------------
 
+    def _reload_config(self):
+        """config.json changed (the settings screen, or by hand): in use at once."""
+        if store.config_mtime() != self.cfg_mtime:
+            self.cfg_mtime, self.cfg = store.config_mtime(), store.load_config()
+
     async def poll(self):
+        self._reload_config()
         rows = await asyncio.get_event_loop().run_in_executor(None, sessions_mod.list_sessions)
         if rows is not None:
             if self.engine:
@@ -947,6 +974,34 @@ class App:
         store._write(store.CONFIG, dict(store._read(store.CONFIG, {}), theme=self.cfg["theme"]))
         self.flash(f"Theme: {self.cfg['theme']}. t shows the others.")
 
+    def change_setting(self):
+        """Enter on the settings screen: a switch turns over, a choice moves
+        to the next one, a text opens for typing (save_setting)."""
+        key, kind, _ = SETTINGS[self.set_sel]
+        value = self.cfg.get(key)
+        if kind is str:
+            self.set_edit, self.buf = True, value or ""
+            return
+        if kind is bool:
+            new = not value
+        else:
+            choices = list(look.THEMES) if kind == "themes" else kind
+            new = choices[(choices.index(value) + 1) % len(choices)] if value in choices else choices[0]
+        self.save_setting(key, new)
+
+    def save_setting(self, key, value):
+        """A setting into config.json and into use at once; the service reads
+        the changed file at its next poll."""
+        store.set_config(key, value)
+        self.cfg[key], self.cfg_mtime = value, store.config_mtime()
+        if key == "theme":
+            self.pal = look.palette(self.appearance, value)
+        note = {"hotkeys": " It applies when this screen opens again (q, then claude-focus).",
+                "scorer": " jev needs a TypeSafe or OpenRouter key (README, Scoring)." if value == "jev" else ""}
+        shown = "on" if value is True else "off" if value in (False, "") else value
+        self.flash(f"{key}: {shown}.{note.get(key, '')}")
+        store.log(f"setting {key} = {value!r}")
+
     def _update_selected(self, fn, done_text):
         sec, item = self.selected()
         if not item:
@@ -1080,6 +1135,8 @@ class App:
                 await self.pick_folder()
             elif key in ("t", "T"):
                 self.theme_step(1 if key == "t" else -1)
+            elif key == "i":
+                self.mode, self.set_edit = "settings", False
             elif sec == "terminals" and key in ("s", "p", "d", "u", "r", "x"):
                 self.flash("A free terminal: Enter starts a new session in it.")
             elif key == "x" and item:
@@ -1194,6 +1251,23 @@ class App:
             elif key == "\t":
                 self.mode = "main"
                 await self.go_terminal(term)
+        elif self.mode == "settings" and self.set_edit:
+            if key == "\x1b":
+                self.set_edit = False
+            elif key in ("\r", "\n"):
+                self.set_edit = False
+                self.save_setting(SETTINGS[self.set_sel][0], self.buf.strip())
+            elif key in ("\x7f", "\b", "\x15"):
+                self.buf = "" if key == "\x15" else self.buf[:-1]
+            elif key.isprintable():
+                self.buf += key
+        elif self.mode == "settings":
+            if key in ("\x1b", "i", "q"):
+                self.mode = "main"
+            elif key in ("\x1b[A", "\x1bOA", "k", "\x1b[B", "\x1bOB", "j"):
+                self.set_sel = (self.set_sel + (-1 if key in ("\x1b[A", "\x1bOA", "k") else 1)) % len(SETTINGS)
+            elif key in ("\r", "\n", " "):
+                self.change_setting()
         elif self.mode == "themes":
             if key in ("t", "j", "\x1b[B", "\x1bOB", "\x1b[C", "\x1bOC"):
                 self.theme_step(1)
@@ -1466,6 +1540,34 @@ class App:
             lines.append(f"    {faint}↓ {below} more{R}")
         return lines
 
+    def _settings_lines(self, w):
+        """The settings screen (i): each setting, its value (on in green, off
+        faint) and what it does; the selected one highlighted, or open for
+        typing."""
+        P, acc = self.pal, self.pal["todo"]
+        dim, faint = fg(P["dim"]), fg(P["faint"])
+        lines = [self.section_title("todo", "SETTINGS", "", w), ""]
+        kw = max(len(k) for k, _, _ in SETTINGS)
+        for n, (key, kind, about) in enumerate(SETTINGS):
+            on = n == self.set_sel
+            value = self.cfg.get(key)
+            if on and self.set_edit:
+                shown = f"{fg(P['text'])}{self.buf}{R}{fg(acc)}█{R}"
+            elif value is True:
+                shown = f"{fg(P['terminals'])}{B}on{R}"
+            elif value in (False, "", None):
+                shown = f"{dim}off{R}"
+            else:
+                shown = f"{fg(P['text'])}{look.cut(str(value), 30)}{R}"
+            line = ((f"{fg(acc)}{P.get('marker', '▌')}{R} " if on else "  ")
+                    + f"{fg(P['text'] if on else P['soft'])}{look.pad(key, kw)}{R}  "
+                    + look.pad(shown, 32) + f"  {dim}{about}{R}")
+            line = fit(line, w)
+            lines.append(self._on(line, acc, w) if on else line)
+        lines += ["", f"  {faint}Saved in {short_path(store.CONFIG)}; the rest of the settings are in that "
+                      f"file (README, Configuration).{R}"]
+        return lines
+
     def _start_lines(self, w):
         """The step after the folder picker, in a folder where Claude Code ran
         before: a new session, the last one continued, or an earlier one
@@ -1531,11 +1633,13 @@ class App:
             list_lines = self._folder_lines(inner, room)
         elif self.mode == "start":
             list_lines = self._start_lines(inner)
+        elif self.mode == "settings":
+            list_lines = self._settings_lines(inner)
         elif not self.rows():
             list_lines += [f"  {fg(P['dim'])}No Claude sessions and no free terminal.{R}"]
         elif not v.get("need") and not v.get("todo"):
             list_lines += [f"  {fg(P['terminals'])}{B}✓ Nothing needs you now.{R}"]
-        for key, title in SECTIONS if self.mode not in ("folders", "start") else ():
+        for key, title in SECTIONS if self.mode not in ("folders", "start", "settings") else ():
             if not v.get(key):
                 continue
             if list_lines:
@@ -1610,6 +1714,13 @@ class App:
                     f"{themes.ABOUT.get(name, '')}{R}   " + self._sep().join([
                         self._key("↑↓", "other theme"), self._key("⏎", "keep it"),
                         self._key("esc", f"back to {self.theme_was}")]))
+        if self.mode == "settings":
+            if self.set_edit:
+                return "  " + self._sep().join([self._key("⏎", "save"), self._key("esc", "cancel")])
+            kind = SETTINGS[self.set_sel][1]
+            what = "switch it" if kind is bool else "type it" if kind is str else "next choice"
+            return "  " + self._sep().join([self._key("⏎", what), self._key("↑↓", "select"),
+                                            self._key("esc", "back")])
         if self.mode == "start":
             return "  " + self._sep().join([self._key("⏎", "start"), self._key("↑↓", "select"),
                                      self._key("tab", "just go to the terminal"), self._key("esc", "back to the folders")])
@@ -1626,7 +1737,7 @@ class App:
                                      self._key("esc", "cancel")])
         keys = [("⏎", "go"), ("↑↓", "select"), ("esc", "top"), ("n", "new session"), ("s", "snooze"),
                 ("u", "unwait"), ("p", "priority"), ("d", "done"), ("x", "close"), ("r", "rescore"),
-                ("t", "theme"), ("q", "quit")]
+                ("t", "theme"), ("i", "settings"), ("q", "quit")]
         if self.update_v:
             keys.insert(-1, ("U", f"update to {self.update_v}"))
         if self.cfg.get("hotkeys"):

@@ -296,6 +296,7 @@ screen has the keys, its title bar is green (in a theme, the theme's color).
 | R | iTerm2: restore the windows of the last iTerm2 run (shown only when some are closed) |
 | t, T | Show the next theme, or the one before; Enter keeps it, Esc goes back (see "Themes") |
 | U | When the screen says a new version is out: install it (see "Upgrade") |
+| i | Settings: see and change the main settings (see "Configuration") |
 | q | Quit |
 
 From anywhere: in iTerm2, two optional global hotkeys (`"hotkeys": true` in
@@ -672,8 +673,16 @@ remote machine show without a pane.
 
 ## Configuration
 
+The settings you change most are on the focus screen: `i` lists them with
+their values; ↑ ↓ select one, Enter switches it on or off, moves a choice
+to the next one, or opens a text for typing (Enter saves it, Esc keeps the
+old one), and Esc goes back. A change is saved in
+`~/.claude-focus/config.json` and in use at once, in the service too: it
+reads the file again when it changes. The global hotkeys apply when the
+focus screen opens again.
+
 `~/.claude-focus/config.json` overrides the defaults in
-`claude_focus/store.py`. For example:
+`claude_focus/store.py`, and holds all the settings below. For example:
 
 ```json
 {"user_name": "Ana", "user_role": "a freelance developer", "companies": {"acme": "Acme"}}

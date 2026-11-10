@@ -105,6 +105,21 @@ def load_config():
     return cfg
 
 
+def set_config(key, value):
+    """Change one setting in config.json, keeping the others as they are."""
+    ensure()
+    cfg = _read(CONFIG, {})
+    cfg[key] = value
+    _write(CONFIG, cfg)
+
+
+def config_mtime():
+    try:
+        return os.stat(CONFIG).st_mtime
+    except OSError:
+        return 0
+
+
 def user(cap=False):
     """The user's name for messages (config "user_name"); cap=True for the
     start of a sentence ("The user")."""
