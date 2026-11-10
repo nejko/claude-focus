@@ -1,3 +1,3 @@
 """claude-focus: one priority queue over all running Claude Code sessions."""
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
