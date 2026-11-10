@@ -154,6 +154,28 @@ class IndexTest(unittest.TestCase):
     def test_timestamps_are_utc(self):
         self.assertEqual(history._when("2026-07-01T12:00:00.000Z"), 1782907200)  # in summer time too
 
+    def test_the_folder_it_started_in(self):
+        # It went into web/ later: it is resumed where its transcript is kept, not there.
+        self.write([entry("user", "zacni"), entry("assistant", [{"type": "text", "text": "grem v web"}], cwd="/w/acme/web"),
+                    entry("user", "naprej", cwd="/w/acme/web")])
+        self.sync()
+        [hit] = self.search("zacni")
+        self.assertEqual(hit["cwd"], "/w/acme")
+        self.assertEqual(history.session_folder(None, "/x/a/b", "-x-a"), "/x/a/b")  # the first one seen
+        self.assertEqual(history.session_folder("/x/a/b", "/x/a", "-x-a"), "/x/a")  # the transcript's folder wins
+
+    def test_an_index_of_version_3_keeps_its_descriptions(self):
+        self.sync()
+        con = history.connect(self.db)
+        con.execute("UPDATE files SET about='opis', about_n=2, cwd='/w/acme/web'")
+        con.execute("PRAGMA user_version=3")
+        con.commit()
+        con.close()
+        self.sync()
+        con = history.connect(self.db)
+        self.assertEqual(con.execute("SELECT cwd, about, msgs FROM files").fetchone(), ("/w/acme", "opis", 2))
+        self.assertEqual(con.execute("SELECT count(*) FROM texts").fetchone()[0], 2)  # read again, once
+
     def test_a_query_fts_cannot_parse(self):
         self.sync()
         self.assertEqual(self.search('"" * ( ^'), [])

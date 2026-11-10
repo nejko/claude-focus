@@ -46,13 +46,20 @@ CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, session TEXT, cwd TEXT,
 CREATE VIRTUAL TABLE IF NOT EXISTS texts USING fts5(session UNINDEXED, at UNINDEXED, role UNINDEXED, body,
     tokenize='unicode61 remove_diacritics 2');
 """
-VERSION = 3  # of SCHEMA: an index of another version is built again
+VERSION = 4  # of SCHEMA and of what is read into it; an index of another version is built again
 
 
 def connect(db=DB):
     con = sqlite3.connect(db, timeout=30)
     con.execute("PRAGMA journal_mode=WAL")  # the focus window reads while the index writes
-    if con.execute("PRAGMA user_version").fetchone()[0] != VERSION:
+    version = con.execute("PRAGMA user_version").fetchone()[0]
+    if version == 3:
+        # 3 kept the last folder a session worked in as its folder (index_file):
+        # read every transcript again, but keep the descriptions, which cost money.
+        con.executescript("DELETE FROM texts; UPDATE files SET done=0, msgs=0, cwd=NULL, first=NULL;")
+        con.execute(f"PRAGMA user_version={VERSION}")
+        con.commit()
+    elif version != VERSION:
         con.executescript("DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS texts;")
         con.execute(f"PRAGMA user_version={VERSION}")
     con.executescript(SCHEMA)
@@ -84,6 +91,20 @@ def message_text(entry):
     return text[:MAX_TEXT]
 
 
+def session_folder(known, seen, folder):
+    """The folder a session is resumed in: the one whose name Claude Code
+    keeps its transcript under (~/.claude/projects/<folder>), else the first
+    one seen. Each message names the folder the session was in then, and a
+    session that went into a subfolder (dobri-filmi into web/) was resumed
+    there, as a project Claude Code had never been trusted with (2026-11-10)."""
+    if not seen or known == seen:
+        return known
+    if known is None or (re.sub(r"[^a-zA-Z0-9]", "-", seen) == folder
+                         and re.sub(r"[^a-zA-Z0-9]", "-", known) != folder):
+        return seen
+    return known
+
+
 def index_file(con, path, session):
     """Add what the transcript gained since the last run. A file that shrank
     or was replaced is indexed again from the start."""
@@ -100,7 +121,7 @@ def index_file(con, path, session):
     else:
         con.execute("DELETE FROM texts WHERE session=?", (session,))
         start, cwd, entry, name, title, prompt, first, msgs, last_at, about, about_n = 0, *[None] * 10
-    rows, done = [], start
+    rows, done, folder = [], start, os.path.basename(os.path.dirname(path))
     with open(path, "rb") as f:  # line by line: one transcript had more than 1 GB
         f.seek(start)
         for line in f:
@@ -114,7 +135,7 @@ def index_file(con, path, session):
             except ValueError:
                 continue
             kind = e.get("type")
-            cwd = e.get("cwd") or cwd
+            cwd = session_folder(cwd, e.get("cwd"), folder)
             entry = e.get("entrypoint") or entry
             if kind == "custom-title":
                 name = e.get("customTitle") or name
