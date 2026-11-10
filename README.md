@@ -141,8 +141,8 @@ to say what matters to you.
 
 The service looks on PyPI once a day for a new version. When one is out,
 the focus screen says so under its title, and `U` installs it the way you
-installed claude-focus (`brew upgrade claude-focus`, `uv tool upgrade
-claude-focus` or `pipx upgrade claude-focus`), then runs `claude-focus setup
+installed claude-focus (`brew update` and `brew upgrade claude-focus`, `uv tool install
+claude-focus@latest` or `pipx upgrade claude-focus`), then runs `claude-focus setup
 --yes`, which restarts the service on the new code; quit the focus screen
 (`q`) and open it again for the new version there too. Nothing updates by
 itself. `claude-focus update` does the same from a terminal, and

@@ -60,12 +60,18 @@ class RunTest(unittest.TestCase):
         return subprocess.CompletedProcess([], code, out, "")
 
     def test_brew_then_setup(self):
-        with mock.patch.object(update.subprocess, "run", side_effect=[self.done(), self.done()]) as run, \
+        with mock.patch.object(update.subprocess, "run", side_effect=[self.done()] * 3) as run, \
                 mock.patch.object(update, "installed", return_value="9.0.0"):
             ok, _ = update.run("brew", say=lambda t: None)
         self.assertTrue(ok)
-        self.assertEqual([c.args[0] for c in run.call_args_list],
-                         [["brew", "upgrade", "claude-focus"], ["claude-focus", "setup", "--yes"]])
+        self.assertEqual([c.args[0] for c in run.call_args_list],  # brew update first: the tap is refreshed only now and then
+                         [["brew", "update"], ["brew", "upgrade", "claude-focus"], ["claude-focus", "setup", "--yes"]])
+
+    def test_uv_takes_the_latest_over_a_pin(self):
+        with mock.patch.object(update.subprocess, "run", side_effect=[self.done()] * 2) as run, \
+                mock.patch.object(update, "installed", return_value="9.0.0"):
+            update.run("uv", say=lambda t: None)
+        self.assertEqual(run.call_args_list[0].args[0], ["uv", "tool", "install", "claude-focus@latest"])
 
     def test_nothing_newer_yet(self):
         # The Homebrew formula comes after the PyPI release, by hand.

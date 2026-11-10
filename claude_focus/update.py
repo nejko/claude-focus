@@ -14,11 +14,14 @@ from . import __version__, store
 
 PYPI = "https://pypi.org/pypi/claude-focus/json"
 CHECK_HOURS = 24
-# How each kind of install upgrades itself (install_kind).
+# How each kind of install upgrades itself (install_kind), one command after
+# the other. Tested from 0.1.4 to 0.1.5 on 2026-11-10: `brew upgrade` alone
+# saw no new formula (Homebrew refreshes its taps only now and then), and
+# `uv tool upgrade` keeps an install made with a version pin where it is.
 COMMANDS = {
-    "brew": ["brew", "upgrade", "claude-focus"],
-    "uv": ["uv", "tool", "upgrade", "claude-focus"],
-    "pipx": ["pipx", "upgrade", "claude-focus"],
+    "brew": [["brew", "update"], ["brew", "upgrade", "claude-focus"]],
+    "uv": [["uv", "tool", "install", "claude-focus@latest"]],
+    "pipx": [["pipx", "upgrade", "claude-focus"]],
 }
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -94,22 +97,23 @@ def run(kind=None, setup=True, say=print):
     """Upgrade with the command of this install, then `claude-focus setup
     --yes`, which restarts the service on the new code. Returns (ok, text)."""
     kind = kind or install_kind()
-    cmd = COMMANDS.get(kind)
-    if not cmd:
+    cmds = COMMANDS.get(kind)
+    if not cmds:
         return False, ("this copy runs from a git checkout: pull it" if kind == "checkout"
                        else "upgrade it the way you installed it, for example pip install -U claude-focus")
-    say(f"Updating: {' '.join(cmd)}")
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    except (OSError, subprocess.TimeoutExpired) as ex:
-        return False, f"{' '.join(cmd)} failed: {ex}"
-    if r.returncode:
-        return False, f"{' '.join(cmd)} failed: {(r.stderr or r.stdout).strip()[-200:]}"
+    for cmd in cmds:
+        say(f"Updating: {' '.join(cmd)}")
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        except (OSError, subprocess.TimeoutExpired) as ex:
+            return False, f"{' '.join(cmd)} failed: {ex}"
+        if r.returncode:
+            return False, f"{' '.join(cmd)} failed: {(r.stderr or r.stdout).strip()[-200:]}"
     now = installed()
     if not newer(now or ""):
         # The Homebrew formula follows a PyPI release by hand, so brew can have nothing newer yet.
-        return False, f"{' '.join(cmd)} found nothing newer than {now or __version__} yet; try again later"
-    store.log(f"update: {' '.join(cmd)} installed {now}")
+        return False, f"found nothing newer than {now or __version__} yet; try again later"
+    store.log(f"update: {kind} installed {now}")
     if setup:
         say("Running claude-focus setup --yes")
         try:
