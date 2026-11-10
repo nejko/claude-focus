@@ -699,6 +699,7 @@ focus screen opens again.
 | `ask_model` | `"claude-haiku-5-5"` | With jev: the model that writes the one-line request (`""` = off) |
 | `history_model` | `"claude-haiku-5-5"` | The model that describes past sessions for the search (`""` = off; see "Past sessions") |
 | `confirm_close` | `true` | `x` asks y before it closes a session; `false` closes it at once |
+| `ask_nudge` | `false` | When a turn's text leaves you a decision or a step (scored decision, action, review or login) but asks no question, type a reminder into the session's empty prompt to ask with AskUserQuestion; at most once in 30 minutes per session, never into one you are in or one that waits |
 | `check_updates` | `true` | Look on PyPI once a day for a new version (see "Upgrade") |
 | `scorer_parallel` | `4` | Sessions scored at the same time |
 | `poll_seconds` | `3` | How often the state is read at the latest; a change of a session's status is read at once |
@@ -752,7 +753,8 @@ The jev keys live in `~/.config/claude-focus/credentials` (see "Scoring").
   claude-focus sends nothing else anywhere.
 - It types into your terminals only for wake-up messages (only into an
   empty prompt), `/exit` when you close a session with `x` (only into an
-  empty prompt), the command of a new or resumed session that you start
+  empty prompt), the reminder to ask with AskUserQuestion (`ask_nudge`, off
+  by default; only into an empty prompt), the command of a new or resumed session that you start
   from the folder list, and in iTerm2 the restore commands, Esc on `reboot` and the
   profile escape sequence. In herdr it also sets the sidebar tokens, which
   stay inside herdr.

@@ -49,12 +49,20 @@ KIND_LABEL = {"decision": "decision", "action": "action", "login": "login",
 # after the folder picker): key, label, what follows new_session_command.
 START_KINDS = [("n", "New session", ""), ("c", "Continue the last session", " --continue"),
                ("r", "Resume an earlier session", " --resume")]  # --resume: Claude Code's own list
+# ask_nudge: the kinds of score that leave the user something to answer or do,
+# how long one session waits for its next reminder, and the reminder.
+NUDGE_KINDS = ("decision", "action", "review", "login")
+NUDGE_PAUSE_S = 1800
+NUDGE_TEXT = ("[claude-focus reminder] Your last message leaves {user} a decision or a step, but you did not ask "
+              "with AskUserQuestion. Ask it now with AskUserQuestion: one question per decision, each option a "
+              "concrete action. If nothing is needed from {user}, say so in one line.")
 # The settings that i shows and changes (config.json), in this order: key,
 # its kind (bool, str, a list of choices where "" is off, or "themes"), and
 # what it does. The rest of the config is for the file (README, Configuration).
 SETTINGS = [
     ("user_name", str, "how sessions and the scorer call you"),
     ("confirm_close", bool, "x asks y before it closes a session"),
+    ("ask_nudge", bool, "remind a session to ask with AskUserQuestion when its text leaves you a decision"),
     ("return_after_answer", bool, "back here after you answer a session's question"),
     ("zoom", bool, "Enter maximizes the session's pane"),
     ("auto_profiles", bool, "iTerm2: free terminals turn green, and back, by themselves"),
@@ -480,9 +488,35 @@ class App:
                 costs.record(s.get("name"), result.get("model"), result.get("cost_usd"))
                 if "ask_model" in result:
                     costs.record(s.get("name"), result["ask_model"], result["ask_cost_usd"])
+                await self._nudge(s, result)
         finally:
             self.scoring.discard(key)
             self.wake.set()
+
+    async def _nudge(self, s, sc):
+        """Config "ask_nudge": the turn ended with a decision or a step for the
+        user in its text, not as a question (AskUserQuestion), so the queue
+        shows only a line made from the text and the answer takes typing. A
+        reminder typed into the empty prompt makes the session ask (dobri-filmi
+        on 2026-11-10: "if you want X, tell me"). At most once in NUDGE_PAUSE_S
+        per session, so one that ignores it is not told again and again; never
+        into a session the user is in, one that waits, or one marked done."""
+        if not self.cfg["ask_nudge"] or s["status"] != "idle" or sc.get("kind") not in NUDGE_KINDS \
+                or q.nothing_needed(sc) or self._user_in(s):
+            return
+        state = store.load_state()
+        e = state["sessions"].get(s["key"], {})
+        if q.pending_of(state, s) or e.get("dismissed_stamp") == s["statusSince"] \
+                or time.time() - e.get("nudged_at", 0) < NUDGE_PAUSE_S:
+            return
+        now = sessions_mod.status_of(s["pid"], s["sessionId"])
+        pane = self.pane_of(s)
+        if not pane or not now or now != ("idle", s["statusSince"]):
+            return  # it has moved on since it was scored
+        ok, why = await self.bridge.send_prompt(pane, store.say(NUDGE_TEXT))
+        if ok:
+            store.update_state(lambda st: st["sessions"].setdefault(s["key"], {}).__setitem__("nudged_at", time.time()))
+            store.log(f"nudged {s.get('name')}: ask with AskUserQuestion (scored {sc.get('kind')})")
 
     def _user_in(self, s):
         """True while this session's pane gets the user's keys (the active pane
