@@ -209,9 +209,10 @@ def search(query, db=DB, limit=30):
     """Past sessions that match every word of the query, as dicts with
     session, cwd, label, last (the last prompt), last_at and snippet (the
     matching text, marked with \\x01 and \\x02; None when the name, title,
-    description or folder matched). Those whose name, title, description,
-    last prompt or folder match come first, then those whose conversation
-    does; each group newest first. Empty sessions are left out."""
+    description or folder matched) and group: "named" for those whose
+    name, title, description, last prompt or folder match, which come first,
+    then "talk" for those whose conversation does; each group newest first,
+    at most limit of each. Empty sessions are left out."""
     words = fold(query).split()
     if not words or not os.path.exists(db):
         return []
@@ -243,11 +244,12 @@ def search(query, db=DB, limit=30):
     finally:
         con.close()
     out = []
-    for _, s, snip in sorted(head) + sorted(body):
-        _, cwd, _, name, title, prompt, first, last_at, about = files[s]
-        out.append({"session": s, "cwd": cwd, "label": label(name, title, first, about), "last": first_line(prompt),
-                    "last_at": last_at, "snippet": snip})
-    return out[:limit]
+    for group, found in (("named", sorted(head)[:limit]), ("talk", sorted(body)[:limit])):
+        for _, s, snip in found:
+            _, cwd, _, name, title, prompt, first, last_at, about = files[s]
+            out.append({"session": s, "cwd": cwd, "label": label(name, title, first, about),
+                        "last": first_line(prompt), "last_at": last_at, "snippet": snip, "group": group})
+    return out
 
 
 # ---- descriptions ---------------------------------------------------------

@@ -128,6 +128,9 @@ class IndexTest(unittest.TestCase):
         self.assertEqual([h["session"] for h in hits], [SID])
         hits = self.search("acme")  # both: the folder name matches both
         self.assertEqual([h["session"] for h in hits], [OTHER, SID])  # newest first
+        self.assertEqual({h["group"] for h in hits}, {"named"})
+        [hit] = self.search("drafts")  # only in what Claude wrote
+        self.assertEqual(hit["group"], "talk")
 
     def test_an_empty_session_is_left_out(self):
         # Opened and closed at once: only Claude Code's own command echo, nothing to resume.
@@ -246,6 +249,24 @@ class PickerTest(unittest.TestCase):
         with mock.patch.object(appmod.history, "search", return_value=[{"session": SID}]):
             asyncio.run(self.app._search_sessions("old", self.app.hit_seq - 1))
         self.assertEqual(self.app.hits, [])
+
+    def test_two_groups_with_headings_and_more(self):
+        import re
+        self.app.pal = appmod.look.DARK
+        hit = lambda n, group: {"session": f"s{n}", "cwd": "/w/x", "label": f"label {n}", "last": "",
+                                "last_at": 0, "snippet": None, "group": group}
+        self.app.hits = [hit(n, "named") for n in range(3)] + [hit(n, "talk") for n in range(3, 9)]
+        self.app.pick["sel"] = 1 + 7  # after the one folder: the eighth session, in the second group
+        text = [re.sub(r"\x1b\[[0-9;]*m", "", x) for x in self.app._hit_lines(120, 8)]
+        self.assertEqual(text[0].strip(), "past sessions: Enter resumes one here")
+        self.assertTrue(text[1].strip().startswith("↑ "))
+        self.assertIn("FOUND IN THE CONVERSATION (6)", "".join(text))
+        self.assertTrue(any("label 7" in x and x.startswith("▌") for x in text))  # the selection is in view
+        self.assertEqual(text[-1].strip(), "↓ 1 more")
+        self.app.pick["sel"] = 1
+        text = [re.sub(r"\x1b\[[0-9;]*m", "", x) for x in self.app._hit_lines(120, 30)]
+        self.assertIn("NAME, DESCRIPTION OR FOLDER (3)", text[1])
+        self.assertNotIn("more", "".join(text))
 
     def test_enter_resumes_it_in_the_free_terminal(self):
         with mock.patch.object(self.app, "start_session", mock.AsyncMock()) as start:

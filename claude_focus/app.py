@@ -1348,20 +1348,44 @@ class App:
 
     def _hit_lines(self, w, room):
         """Below the folders: the past sessions that match what the user typed,
-        each with what it is about (history.label), its folder, last activity,
-        and the words found in it, else its last prompt. At most room rows;
-        the list scrolls to keep the selection in view."""
+        in two groups under their own headings (history.search: the name,
+        description or folder match, then only the conversation), each with
+        what it is about (history.label), its folder, last activity, and the
+        words found in it, else its last prompt. At most room rows; the list
+        scrolls to keep the selection in view, and says how many sessions are
+        above and below it."""
         if not self.hits:
             return []
         P, acc = self.pal, self.pal["terminals"]
         dim = fg(P["dim"])
         hit = self._hit()
-        sel = self.hits.index(hit) if hit else 0
+        heads = {"named": "NAME, DESCRIPTION OR FOLDER", "talk": "FOUND IN THE CONVERSATION"}
+        items = []  # a group heading (its text) or a session (its dict), in screen order
+        for group, title in heads.items():
+            found = [h for h in self.hits if h.get("group", "named") == group]
+            if found:
+                items += [f"  {dim}{B}{title}{R} {dim}({len(found)}){R}"] + found
+        at = next((n for n, x in enumerate(items) if x is hit), 0)
         show = max(1, room - 1)
-        start = sel - show + 1 if sel >= show else 0
+        if len(items) > show:
+            show = max(1, show - 2)  # room for the "more" lines
+        start = at - show + 1 if at >= show else 0
+        end = start + show
+        heading = next((x for x in reversed(items[:start]) if isinstance(x, str)), None)
+        sticky = heading if heading and isinstance(items[start], dict) and show > 1 else None
+        if sticky:
+            start += 1  # the first row makes room for the heading of its group
+        above = sum(1 for x in items[:start] if isinstance(x, dict))
+        below = sum(1 for x in items[end:] if isinstance(x, dict))
+        visible = ([sticky] if sticky else []) + items[start:end]
         lines = [f"  {dim}past sessions: Enter resumes one here{R}"]
+        if above:
+            lines.append(f"    {dim}↑ {above} more{R}")
         lw = min(max(30, w // 2 - 24), max(len(h["label"]) for h in self.hits))
-        for h in self.hits[start:start + show]:
+        for h in visible:
+            if isinstance(h, str):
+                lines.append(h)
+                continue
             on = h is hit
             tone = fg(P["text"] if on else P["soft"])
             snip = (h["snippet"] or "").replace("\x01", f"{R}{fg(acc)}{B}").replace("\x02", f"{R}{dim}")
@@ -1374,6 +1398,8 @@ class App:
                     + (f"  {dim}{snip}{R}" if snip else ""))
             line = fit(line, w)
             lines.append(self._on(line, acc, w) if on else line)
+        if below:
+            lines.append(f"    {dim}↓ {below} more{R}")
         return lines
 
     def _start_lines(self, w):
