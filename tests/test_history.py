@@ -217,6 +217,30 @@ class DescribeTest(unittest.TestCase):
         call.assert_not_awaited()
 
 
+class NewSessionTest(unittest.TestCase):
+    """A session without a transcript is not scored: its pane can still show
+    the session that ran there before (2026-11-10)."""
+    def test_no_transcript_no_scorer(self):
+        app = appmod.App(None)
+        app.bridge = mock.Mock(pane_of=lambda s: "p1", screen_text=mock.AsyncMock(return_value="old session"))
+        s = {"key": "k", "sessionId": SID, "cwd": "/w/new", "name": "ultima2-85", "statusSince": 5}
+        with mock.patch.object(appmod.sessions_mod, "transcript_path", return_value=None), \
+                mock.patch.object(appmod.scorer, "score", mock.AsyncMock()) as score:
+            asyncio.run(app._score(s))
+        score.assert_not_awaited()
+        sc = appmod.store.load_state()["sessions"]["k"]["score"]
+        self.assertEqual((sc["kind"], sc["ask"], sc["scored_for"]), ("nothing", "New session: nothing said yet", 5))
+
+    def test_the_screen_from_the_banner_on(self):
+        from claude_focus import screen
+        text = "\n".join(["⏺ Odgovori Juretu o Domnu", "❯ /exit", "nejc % cd ultima2 && claude",
+                          " ▐▛███▛█   Claude Code v2.1.322", "▝▜██████▀  Opus 5.5", "", "❯ "])
+        self.assertEqual(screen.since_start(text).split("\n")[0], " ▐▛███▛█   Claude Code v2.1.322")
+        self.assertEqual(screen.since_start("no banner\nhere"), "no banner\nhere")
+        self.assertEqual(screen.since_start("we talked about Claude Code v2.1.300\nok"),
+                         "we talked about Claude Code v2.1.300\nok")  # words, not the banner
+
+
 class PickerTest(unittest.TestCase):
     def setUp(self):
         self.app = appmod.App(None)
@@ -289,23 +313,29 @@ class CloseTest(unittest.TestCase):
 
     def test_only_a_session_at_rest(self):
         for status, why in (("busy", "working"), ("waiting", "question"), ("shell", "background shells")):
-            self.app.ask_close({"s": {"name": "x", "status": status, "pane": "p1"}})
+            asyncio.run(self.app.ask_close({"s": {"name": "x", "status": status, "pane": "p1"}}))
             self.assertEqual(self.app.mode, "main")
             self.assertIn(why, self.app.msg)
-        self.app.ask_close({"s": {"name": "x", "status": "idle"}})
+        asyncio.run(self.app.ask_close({"s": {"name": "x", "status": "idle"}}))
         self.assertIn("no iTerm2 pane", self.app.msg)
-        self.app.ask_close({"s": {"name": "x", "status": "idle", "pane": "p1"}})
+        asyncio.run(self.app.ask_close({"s": {"name": "x", "status": "idle", "pane": "p1"}}))
         self.assertEqual(self.app.mode, "close")
 
     def test_y_types_exit(self):
         s = {"name": "x", "status": "idle", "pane": "p1"}
-        self.app.ask_close({"s": s})
+        asyncio.run(self.app.ask_close({"s": s}))
         asyncio.run(self.app.on_key("y"))
         self.app.bridge.send_prompt.assert_awaited_once_with("p1", "/exit")
         self.assertEqual(self.app.mode, "main")
 
+    def test_without_confirmation(self):
+        self.app.cfg = dict(self.app.cfg, confirm_close=False)
+        asyncio.run(self.app.ask_close({"s": {"name": "x", "status": "idle", "pane": "p1"}}))
+        self.app.bridge.send_prompt.assert_awaited_once_with("p1", "/exit")
+        self.assertEqual(self.app.mode, "main")
+
     def test_esc_keeps_it(self):
-        self.app.ask_close({"s": {"name": "x", "status": "idle", "pane": "p1"}})
+        asyncio.run(self.app.ask_close({"s": {"name": "x", "status": "idle", "pane": "p1"}}))
         asyncio.run(self.app.on_key("\x1b"))
         self.app.bridge.send_prompt.assert_not_awaited()
         self.assertEqual(self.app.mode, "main")

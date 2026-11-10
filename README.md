@@ -277,7 +277,7 @@ screen has the keys, its title bar is green (in a theme, the theme's color).
 | u | Unwait: end a snooze, a pending wait or a "done" mark |
 | p | Set a manual priority (0 = back to automatic) |
 | d | Done: nothing is needed now; the session comes back when it changes. On a to-do: your part is done |
-| x | Close the selected session: after y, claude-focus types `/exit` into its empty prompt. Only for a session whose turn has ended (not one that works, asks a question or waits for its background shells). Its conversation stays: a free terminal finds it again (see "Past sessions") |
+| x | Close the selected session: after y (none with `"confirm_close": false`), claude-focus types `/exit` into its empty prompt. Only for a session whose turn has ended (not one that works, asks a question or waits for its background shells). Its conversation stays: a free terminal finds it again (see "Past sessions") |
 | r | Score the selected session again |
 | R | iTerm2: restore the windows of the last iTerm2 run (shown only when some are closed) |
 | t, T | Show the next theme, or the one before; Enter keeps it, Esc goes back (see "Themes") |
@@ -674,6 +674,7 @@ remote machine show without a pane.
 | `jev_model` | `"jev-latest"` | The model of the jev scorer |
 | `ask_model` | `"claude-haiku-5-5"` | With jev: the model that writes the one-line request (`""` = off) |
 | `history_model` | `"claude-haiku-5-5"` | The model that describes past sessions for the search (`""` = off; see "Past sessions") |
+| `confirm_close` | `true` | `x` asks y before it closes a session; `false` closes it at once |
 | `scorer_parallel` | `4` | Sessions scored at the same time |
 | `poll_seconds` | `3` | How often the state is read at the latest; a change of a session's status is read at once |
 | `aging_points_per_hour`, `aging_max` | `0.15`, `10` | The bonus for waiting, added to the score; the sum stays at most 100, and at 100 the longer wait goes first |

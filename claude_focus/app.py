@@ -82,6 +82,16 @@ def ago(t):
     return "now" if time.time() - t < 60 else f"{fmt_wait((time.time() - t) / 3600)} ago"
 
 
+def new_session_score(s):
+    """The score of a session without a transcript: Claude Code writes it
+    with the first message, so nothing was said and nothing is asked. No
+    scorer runs: the pane can still show the session that ran there before,
+    which the scorer took for this one's request (2026-11-10)."""
+    return {"priority": 1, "kind": "nothing", "ask": "New session: nothing said yet", "effort_min": 0,
+            "deadline": "", "pending_until": "", "level": 0, "level_p": 1.0, "company": "", "confidence": 1.0,
+            "cost_usd": None, "model": "none", "scored_for": s["statusSince"], "scored_at": int(time.time() * 1000)}
+
+
 def marked(text, words, tone, match):
     """Plain text in tone, every place where one of the words (lower case)
     occurs in match."""
@@ -393,13 +403,17 @@ class App:
         key = s["key"]
         try:
             async with self.sem:
-                screen = ""
-                pane = self.pane_of(s)
-                if pane:
-                    screen = await self.bridge.screen_text(pane)
-                last = await asyncio.get_event_loop().run_in_executor(
-                    None, sessions_mod.last_assistant_text, s["cwd"], s["sessionId"])
-                result = await scorer.score(s, screen, last, self.cfg)
+                loop = asyncio.get_event_loop()
+                if not await loop.run_in_executor(None, sessions_mod.transcript_path, s["cwd"], s["sessionId"]):
+                    result = new_session_score(s)
+                else:
+                    screen = ""
+                    pane = self.pane_of(s)
+                    if pane:
+                        screen = await self.bridge.screen_text(pane)
+                    last = await loop.run_in_executor(
+                        None, sessions_mod.last_assistant_text, s["cwd"], s["sessionId"])
+                    result = await scorer.score(s, screen, last, self.cfg)
             if result is None:
                 self.score_failed[key] = time.time()
             else:
@@ -925,8 +939,9 @@ class App:
         self._update_selected(lambda st, e, s: e.__setitem__("manual_priority", value or None),
                               "{name}: priority " + str(value or "back to automatic") + ".")
 
-    def ask_close(self, item):
-        """x: ask whether to end the selected session (close_session)."""
+    async def ask_close(self, item):
+        """x: end the selected session (close_session), after y when config
+        "confirm_close" is on (the default)."""
         s = item["s"]
         why = ("it is working; close it when its turn has ended" if s["status"] == "busy" else
                "it asks you a question; answer it first" if s["status"] == "waiting" else
@@ -934,8 +949,10 @@ class App:
                f"it has no {self.bridge.label} pane" if not self.pane_of(s) else None)
         if why:
             self.flash(f"{s.get('name')}: not closed, {why}.")
-            return
-        self.closing, self.mode = s, "close"
+        elif self.cfg["confirm_close"]:
+            self.closing, self.mode = s, "close"
+        else:
+            await self.close_session(s)
 
     async def close_session(self, s):
         """x, then y: end a session by typing /exit into its prompt. Its
@@ -1039,7 +1056,7 @@ class App:
             elif sec == "terminals" and key in ("s", "p", "d", "u", "r", "x"):
                 self.flash("A free terminal: Enter starts a new session in it.")
             elif key == "x" and item:
-                self.ask_close(item)
+                await self.ask_close(item)
             elif key == "s" and item:
                 if sec == "working":
                     self.flash("It is working now; nothing to snooze.")

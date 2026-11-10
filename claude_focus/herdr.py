@@ -14,7 +14,7 @@ import subprocess
 import time
 
 from . import store
-from .screen import EMPTY, OTHER, clean, prompt_state, strip_ansi, without_suggestion
+from .screen import EMPTY, OTHER, clean, prompt_state, since_start, strip_ansi, without_suggestion
 from .terminal import SHELLS
 
 PROTOCOL = 22             # the API version this was written for (herdr 0.9.5)
@@ -275,7 +275,7 @@ class Bridge:
                                                   "strip_ansi": False}))["read"]
         except (Error, KeyError):
             return ""
-        text = without_suggestion(strip_ansi(read["text"]), ansi=read["text"])
+        text = since_start(without_suggestion(strip_ansi(read["text"]), ansi=read["text"]))
         lines = [clean(x) for x in text.splitlines()]
         while lines and not lines[-1]:
             lines.pop()

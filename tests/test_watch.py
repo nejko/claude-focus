@@ -121,6 +121,7 @@ class ScoreRetryTest(unittest.TestCase):
 
     def test_a_failed_score_waits(self):
         with mock.patch.object(appmod.scorer, "score", mock.AsyncMock(return_value=None)), \
+                mock.patch.object(appmod.sessions_mod, "transcript_path", return_value="/x/t.jsonl"), \
                 mock.patch.object(appmod.sessions_mod, "last_assistant_text", return_value=""):
             asyncio.run(self.app._score(self.app.sessions[0]))
         self.assertFalse(self.scheduled())

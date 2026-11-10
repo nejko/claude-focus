@@ -89,6 +89,21 @@ def prompt_state(text, cursor=None, ansi=None):
     return DRAFT
 
 
+# The first line of Claude Code's banner when it starts: " ▐▛███▛█   Claude Code v2.1.322".
+BANNER = re.compile(r"[▐▛▜▝▘▗▖▙▟█]{2,}.*\bClaude Code v\d")
+
+
+def since_start(text):
+    """The screen from the banner of the Claude Code that runs in the pane
+    now (the last banner), when it is on the screen. Above it is what ran
+    before in that terminal: a new session in a free terminal showed the
+    last message of the session that had ended there, and the scorer took
+    it for the new one's request (2026-11-10)."""
+    lines = text.split("\n")
+    start = max((n for n, x in enumerate(lines) if BANNER.search(x)), default=0)
+    return "\n".join(lines[start:])
+
+
 def without_suggestion(text, cursor=None, ansi=None):
     """`text` without Claude Code's grey suggestion in an empty input box
     (prompt_state tells it from a draft). The scorers read the screen: with
