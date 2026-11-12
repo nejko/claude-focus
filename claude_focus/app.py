@@ -737,7 +737,9 @@ class App:
         If that is not safe, put it into the user's queue instead."""
         msg = pend.wake_message(p, reason, output)
         pane = self.pane_of(s)
-        if not pane:
+        if not pane and (s.get("jobId") or s.get("kind") == "bg") and s["status"] in q.AT_PROMPT:
+            ok, why = await self._wake_background(s, msg)
+        elif not pane:
             ok, why = False, f"no {self.bridge.label} pane"
         elif s["status"] not in q.AT_PROMPT:
             ok, why = False, ("the session waits on a question" if s["status"] == "waiting"
@@ -755,6 +757,30 @@ class App:
         store.update_state(fn)
         store.log(f"wake {s.get('name')}: {text}; " + ("message sent" if ok else f"not sent ({why})"))
         self.flash(f"Woke {s.get('name')}: {text}" + ("" if ok else f" (not sent: {why})"))
+
+    async def _wake_background(self, s, msg):
+        """A background session has no pane to type into: open a terminal (as
+        for n with no free one) and run `claude --resume <id> "<message>"`
+        there, which hands the message to the session as its next turn and
+        shows it in that window (the user's choice, 2026-11-12). Plain
+        `claude`: a flag that sets up a session, such as
+        --dangerously-skip-permissions, makes Claude Code refuse to open a
+        running background session."""
+        if not hasattr(self.bridge, "new_terminal"):
+            return False, f"no {self.bridge.label} pane"
+        pane = await self.bridge.new_terminal()
+        if not pane:
+            return False, f"{self.bridge.label} opened no window for it"
+        claude = shutil.which("claude") or "claude"
+        # Ctrl-U first: the new window takes the keys, and what the user typed
+        # meanwhile lands in its prompt (a live test got ↑ and "cd" from history).
+        # In the session's folder: elsewhere Claude Code first asks whether to trust that folder.
+        where = f"cd {shlex.quote(s['cwd'])} && " if s.get("cwd") else ""
+        line = f"\x15{where}{shlex.quote(claude)} --resume {s['sessionId']} {shlex.quote(msg)}\r"
+        if not await self.bridge.send_text(pane, line):
+            return False, "the new window took no text"
+        store.log(f"wake {s.get('name')}: a background session, resumed in a new window")
+        return True, ""
 
     async def retry_wakeups(self, state):
         """Type a wake-up that could not be typed (a draft, an open question,

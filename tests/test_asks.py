@@ -151,5 +151,24 @@ class ParkedTest(unittest.TestCase):
         self.assertNotIn("old", st["pending"])
 
 
+class BackgroundWakeTest(unittest.TestCase):
+    """A background session has no pane: its wake-up opens a window that runs
+    claude --resume <id> "<message>" (the user's choice, 2026-11-12)."""
+    def test_resumed_in_a_new_window(self):
+        app = appmod.App(None)
+        app.bridge = mock.Mock(pane_of=lambda s: None, label="iTerm2", new_terminal=mock.AsyncMock(return_value="pnew"),
+                               send_text=mock.AsyncMock(return_value=True))
+        s = {"key": "k", "sessionId": "259bb86c-f4d9", "pid": 89533, "name": "sellestial-cashflow-40",
+             "status": "idle", "statusSince": 5, "jobId": "259bb86c", "kind": "bg", "cwd": "/w/sellestial-cashflow"}
+        asyncio.run(app.fire(s, {"note": "TKDIS it's due", "until": 1}, "time"))
+        pane, line = app.bridge.send_text.await_args.args
+        self.assertEqual(pane, "pnew")
+        self.assertTrue(line.startswith("\x15cd /w/sellestial-cashflow && "))  # its folder: no trust question
+        self.assertIn(" --resume 259bb86c-f4d9 '", line)
+        self.assertIn("TKDIS it'\"'\"'s due", line)  # quoted for the shell
+        self.assertNotIn("dangerously", line)  # such a flag makes Claude Code refuse a running background session
+        self.assertTrue(store.load_state()["sessions"]["k"]["woke"]["delivered"])
+
+
 if __name__ == "__main__":
     unittest.main()

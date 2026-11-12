@@ -5,6 +5,7 @@ import asyncio
 import ctypes
 import json
 import os
+import pwd
 import re
 import subprocess
 
@@ -219,7 +220,10 @@ class Bridge:
             return None
         # Type once the user's shell runs: before that, its startup may eat the
         # keys. iTerm2 starts it through bash (login), which is a shell too.
-        mine = os.path.basename(os.environ.get("SHELL", ""))
+        try:  # the login shell, also in the service, whose environment may have no $SHELL
+            mine = os.path.basename(pwd.getpwuid(os.getuid()).pw_shell)
+        except (KeyError, OSError):
+            mine = os.path.basename(os.environ.get("SHELL", ""))
         want = {mine} if mine in SHELLS else SHELLS
         for _ in range(40):
             if ((await s.async_get_variable("jobName")) or "").lstrip("-") in want:
