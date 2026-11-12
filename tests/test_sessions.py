@@ -163,6 +163,17 @@ class BackgroundNameTest(unittest.TestCase):
         self.assertEqual(self.names(bg, named, term), ["sellestial-cashflow-71", "NLB izpiske", "proposal-skill-2a"])
 
 
+class ParkedTest(unittest.TestCase):
+    def test_the_background_job_keeps_the_parked_name(self):
+        parked = {"pid": 70177, "sessionId": "9b462866", "status": "busy", "statusUpdatedAt": 1,
+                  "name": "sellestial-cashflow-40", "nameSource": "derived", "parkedJobId": "259bb86c", "cwd": "/w/c"}
+        job = {"pid": 89533, "sessionId": "259bb86c-f4d9", "status": "idle", "statusUpdatedAt": 2, "kind": "bg",
+               "jobId": "259bb86c", "name": "NLB izpiske cache ažuriranje", "nameSource": "auto", "cwd": "/w/c"}
+        with mock.patch.object(sessions, "_from_files", return_value=[parked, job]):
+            [row] = sessions.list_sessions()
+        self.assertEqual((row["name"], row["parked_from"]), ("sellestial-cashflow-40", "9b462866"))
+
+
 class FromFilesTest(unittest.TestCase):
     def files(self, *rows):
         d = tempfile.mkdtemp()

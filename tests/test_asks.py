@@ -135,5 +135,21 @@ class EnterTest(unittest.TestCase):
         self.assertIsNone(pending.on_prompt({"session_id": "sid", "prompt": "[claude-focus wake-up] x"}))
 
 
+class ParkedTest(unittest.TestCase):
+    """A session moved to the background goes on under another id: its wait
+    and question follow it (the 09:00 reminder of 2026-11-12 stayed behind)."""
+    def test_the_wait_and_question_follow(self):
+        store.update_state(lambda st: (st.__setitem__("pending", {"old": {"pid": 70177, "until": 9, "note": "TKDIS"}}),
+                                       st.__setitem__("asks", {"old": {"id": "q1", "pid": 70177, "questions": []}})))
+        app = appmod.App(None)
+        app.sessions = [{"sessionId": "new", "pid": 89533, "name": "sellestial-cashflow-40", "parked_from": "old",
+                         "jobId": "259bb86c"}]
+        app._follow_parked()
+        st = store.load_state()
+        self.assertEqual((st["pending"]["new"]["pid"], st["pending"]["new"]["note"]), (89533, "TKDIS"))
+        self.assertEqual(st["asks"]["new"]["pid"], 89533)
+        self.assertNotIn("old", st["pending"])
+
+
 if __name__ == "__main__":
     unittest.main()

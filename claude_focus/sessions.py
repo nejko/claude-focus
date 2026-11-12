@@ -71,6 +71,13 @@ def list_sessions(use_cli=False):
     if rows is None:
         return None  # unknown; caller keeps the previous list
     live = []
+    # A terminal session moved to the background (/bg) stays as a parked
+    # process; its conversation goes on in a background job, which is the live
+    # row. That row keeps the parked session's name and id (parked_from), so
+    # its waits and questions follow it (App._follow_parked): on 2026-11-12
+    # sellestial-cashflow-40 became "NLB izpiske cache ažuriranje", Claude
+    # Code's title of its first prompt, and its wait for 09:00 stayed behind.
+    parked = {r["parkedJobId"]: r for r in rows if r.get("parkedJobId") and r.get("sessionId")}
     for r in rows:
         if not r.get("pid") or not r.get("sessionId") or not r.get("status"):
             continue
@@ -81,7 +88,12 @@ def list_sessions(use_cli=False):
 
         r["statusSince"] = _status_since(r)
         r["key"] = r["sessionId"]
-        if not r.get("nameSource") and r.get("name") in (r.get("jobId"), r["sessionId"][:8]) and r.get("cwd"):
+        was = parked.get(r.get("jobId"))
+        if was:
+            r["parked_from"] = was["sessionId"]
+            if r.get("nameSource") in (None, "auto") and was.get("name"):
+                r["name"] = was["name"]
+        elif not r.get("nameSource") and r.get("name") in (r.get("jobId"), r["sessionId"][:8]) and r.get("cwd"):
             # A background session (kind bg) that Claude Code has not named yet
             # carries its id ("71600eb0"); a terminal session gets its folder and
             # two characters ("proposal-skill-2a"), so this one does too.

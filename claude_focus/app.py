@@ -285,6 +285,7 @@ class App:
                     await self._recolor_panes()
                 except Exception as ex:  # never let it break the waker
                     store.log(f"profile switch error: {ex!r}")
+            self._follow_parked()
             await self.pending_tick(store.load_state())
         state = store.load_state()
         self.restore_handled = state.get("restore_handled")
@@ -599,6 +600,30 @@ class App:
             del self.claude_panes[sid]  # the pane closed
 
     # ---- waker ------------------------------------------------------------
+
+    def _follow_parked(self):
+        """A session moved to the background (/bg) goes on as a background job
+        with another session id (sessions.list_sessions: parked_from). Its wait
+        and its queued question move to that job, or the wait stays with the
+        parked process and never fires (sellestial-cashflow-40's reminder for
+        09:00, 2026-11-12)."""
+        moves = [(s["parked_from"], s) for s in self.sessions if s.get("parked_from")]
+        if not moves:
+            return
+        moved = []
+
+        def fn(st):
+            for old, s in moves:
+                for kind in ("pending", "asks"):
+                    recs = st.setdefault(kind, {})
+                    if old in recs and s["sessionId"] not in recs:
+                        recs[s["sessionId"]] = dict(recs.pop(old), pid=s["pid"], name=s.get("name"))
+                        moved.append((kind, s))
+        if any(old in (store.load_state().get(k) or {}) for old, _ in moves for k in ("pending", "asks")):
+            store.update_state(fn)
+            for kind, s in moved:
+                what = "wait" if kind == "pending" else "question"
+                store.log(f"{what} of {s.get('name')} follows it into the background (job {s.get('jobId')})")
 
     async def pending_tick(self, state):
         now_ms = time.time() * 1000
