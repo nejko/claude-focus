@@ -881,18 +881,37 @@ class App:
         await self.go_selected()
 
     def _free_terminal(self, item=None):
-        """The selected free terminal, or the first one (key n)."""
+        """The selected free terminal, or the first one (key n). With none
+        free, a new window (a new tab in herdr) that opens when the session
+        starts (_open_new), as Cmd+N would: before, n only said that no
+        terminal was free."""
         terms = (self.view or {}).get("terminals") or []
         item = item or (terms[0] if terms else None)
+        if not item and hasattr(self.bridge, "new_terminal"):
+            where = "a new window" if self.bridge.profiles else "a new tab"
+            item = {"new": True, "pane": None, "tty": where, "path": "~", "job": "",
+                    "s": {"key": "pane:new", "name": where}}
         if not item:
             self.flash(f"No free terminal: switch a pane to the {self.cfg['free_profile']} profile."
                        if self.bridge.profiles else "No free terminal: open a herdr pane at a shell prompt.")
         return item
 
+    async def _open_new(self, term):
+        """The terminal itself, opened now when it is the new one (_free_terminal)."""
+        if not term.get("new"):
+            return term
+        self.flash(f"Opening {term['tty']}…", 15)  # the shell can take seconds to start
+        pane = await self.bridge.new_terminal()
+        if not pane:
+            self.flash(f"{self.bridge.label} opened no new window: nothing started.")
+            return None
+        store.log(f"opened {term['tty']} for a new session")
+        return dict(term, new=False, pane=pane)
+
     async def go_terminal(self, item=None):
         """Go to a free terminal without starting anything in it."""
-        item = self._free_terminal(item)
-        if not item:
+        item = await self._open_new(self._free_terminal(item) or {})
+        if not item or not item.get("pane"):
             return
         self.sel = None
         if not await self.bridge.go(item["pane"], zoom=self.cfg["zoom"]):
@@ -987,6 +1006,9 @@ class App:
         command), give it the session profile (iTerm2), and go there. Only
         into a pane that is still at a bare shell; Ctrl-U first clears
         anything typed at its prompt."""
+        term = await self._open_new(term)
+        if not term:
+            return
         info = {sid: (profile, job) for sid, _, profile, _, job in await self.bridge.pane_info()}
         profile, job = info.get(term["pane"], (None, None))
         where = shlex.quote(path)

@@ -490,7 +490,9 @@ screen's own pane.
   `metaos:3.2` for the second pane of a tab.
 
 Enter on a free terminal, or `n` for the first one, opens a list of folders
-for a new session. It holds every folder that Claude Code has run in (Claude
+for a new session. When no terminal is free, `n` starts one in a new window
+(in herdr a new tab), as Cmd+N would: it opens when you have picked the
+folder, with `session_profile`, and the session starts in it. It holds every folder that Claude Code has run in (Claude
 Code's own list in `~/.claude.json`) and the subfolders of your project
 folders (`project_roots`), the most recently used first, with the time of
 the last session there. Type to search: every word you type must be in the

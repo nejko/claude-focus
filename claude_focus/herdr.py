@@ -342,6 +342,24 @@ class Bridge:
             self.dark = (time.time(), theme)
         return theme
 
+    async def new_terminal(self):
+        """A new tab at a bare shell, for a new session when no pane is free;
+        its pane id once the shell runs, or None."""
+        try:
+            made = await self.call("tab.create", {"focus": False, "cwd": os.path.expanduser("~")})
+            pane = made["root_pane"]["pane_id"]
+            end = time.time() + SHELL_WAIT
+            while time.time() < end:  # type once the shell runs: before that, its startup may eat the keys
+                info = (await self.call("pane.process_info", {"pane_id": pane}))["process_info"]
+                procs = info.get("foreground_processes") or []
+                if procs and procs[0]["pid"] == info.get("shell_pid"):
+                    break
+                await asyncio.sleep(0.2)
+            await asyncio.sleep(0.3)
+            return pane
+        except (Error, KeyError):
+            return None
+
     async def open_window(self, command):
         """A new tab in the workspace the user looks at, running command."""
         try:

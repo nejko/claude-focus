@@ -11,6 +11,7 @@ import subprocess
 import iterm2
 
 from . import store
+from .terminal import SHELLS
 from .screen import EMPTY, clean, prompt_state, since_start, without_suggestion
 
 MAXIMIZE = iterm2.MainMenu.View.MAXIMIZE_ACTIVE_PANE.value.identifier
@@ -205,6 +206,29 @@ class Bridge:
     def session(self, sid):
         k = self._known.get(sid)
         return k["session"] if k else None
+
+    async def new_terminal(self):
+        """A new window at a bare shell, as Cmd+N gives, for a new session
+        when no terminal is free; in the session profile, since the session
+        starts in it at once. Its pane id once the shell runs, or None."""
+        try:
+            win = await with_session_profile(lambda **k: iterm2.Window.async_create(self.conn, **k))
+            tab = win.current_tab or win.tabs[0]
+            s = tab.current_session or tab.sessions[0]
+        except Exception:  # iTerm2 made no window
+            return None
+        # Type once the user's shell runs: before that, its startup may eat the
+        # keys. iTerm2 starts it through bash (login), which is a shell too.
+        mine = os.path.basename(os.environ.get("SHELL", ""))
+        want = {mine} if mine in SHELLS else SHELLS
+        for _ in range(40):
+            if ((await s.async_get_variable("jobName")) or "").lstrip("-") in want:
+                break
+            await asyncio.sleep(0.2)
+        await asyncio.sleep(0.3)
+        tty = ((await s.async_get_variable("tty")) or "").replace("/dev/", "")  # set once the shell runs
+        self._known[s.session_id] = {"tty": tty, "tab_id": tab.tab_id, "session": s}
+        return s.session_id
 
     async def screen_text(self, sid, max_lines=45):
         s = self.session(sid)

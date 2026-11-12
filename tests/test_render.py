@@ -540,11 +540,22 @@ class TerminalTest(unittest.TestCase):
         self.assertFalse(any("NEED YOU" in x for x in screen))
         self.assertTrue(all(len(x) <= 119 for x in screen))
 
-    def test_n_without_a_free_terminal(self):
+    def test_n_without_a_free_terminal_opens_a_new_window(self):
+        # As Cmd+N would; before, n only said that no terminal was free.
         self.app.bridge.pane_info = mock.AsyncMock(return_value=[])
         self.keys("n")
-        self.app.bridge.go.assert_not_awaited()
-        self.assertIn("Available", self.app.flash.call_args[0][0])
+        self.assertEqual((self.app.mode, self.app.pick["term"]["tty"]), ("folders", "a new window"))
+        self.app.bridge.go.assert_not_awaited()  # nothing opens before a folder is picked
+        opened = [("pnew", "ttys030", "Default", "/Users/ana", "zsh")]
+
+        async def new_terminal():
+            self.app.bridge.pane_info = mock.AsyncMock(return_value=opened)
+            return "pnew"
+        self.app.bridge.new_terminal = new_terminal
+        self.keys("\r")
+        self.assertEqual(self.app.bridge.send_text.await_args.args[0], "pnew")
+        self.assertIn("cd '/Users/ana/quantum notes' && claude", self.app.bridge.send_text.await_args.args[1])
+        self.app.bridge.go.assert_awaited()
 
     def test_session_keys_do_nothing_on_a_terminal(self):
         with mock.patch.object(appmod.store, "update_state") as write:
