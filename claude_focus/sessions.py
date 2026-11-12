@@ -81,6 +81,11 @@ def list_sessions(use_cli=False):
 
         r["statusSince"] = _status_since(r)
         r["key"] = r["sessionId"]
+        if not r.get("nameSource") and r.get("name") in (r.get("jobId"), r["sessionId"][:8]) and r.get("cwd"):
+            # A background session (kind bg) that Claude Code has not named yet
+            # carries its id ("71600eb0"); a terminal session gets its folder and
+            # two characters ("proposal-skill-2a"), so this one does too.
+            r["name"] = f"{os.path.basename(r['cwd'].rstrip('/')) or 'session'}-{r['sessionId'][:2]}"
         live.append(r)
     # Two processes can run the same conversation (a --resume while the old
     # window is still open). Both write to one transcript, which the user must

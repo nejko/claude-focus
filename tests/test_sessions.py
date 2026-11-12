@@ -149,6 +149,20 @@ class ListSessionsTest(unittest.TestCase):
         self.assertEqual([r["sessionId"] for r in live], ["a", "d"])
 
 
+class BackgroundNameTest(unittest.TestCase):
+    def names(self, *rows):
+        with mock.patch.object(sessions, "_from_files", return_value=[dict(r) for r in rows]):
+            return [r["name"] for r in sessions.list_sessions()]
+
+    def test_an_unnamed_background_session_gets_its_folder(self):
+        bg = {"pid": 1, "sessionId": "71600eb0-8739", "status": "idle", "statusUpdatedAt": 1, "kind": "bg",
+              "jobId": "71600eb0", "name": "71600eb0", "cwd": "/w/sellestial-cashflow"}
+        named = dict(bg, pid=2, sessionId="259bb86c-f4d9", jobId="259bb86c", name="NLB izpiske", nameSource="auto")
+        term = {"pid": 3, "sessionId": "10ac89d4", "status": "idle", "statusUpdatedAt": 1, "name": "proposal-skill-2a",
+                "nameSource": "derived", "cwd": "/w/proposal-skill"}
+        self.assertEqual(self.names(bg, named, term), ["sellestial-cashflow-71", "NLB izpiske", "proposal-skill-2a"])
+
+
 class FromFilesTest(unittest.TestCase):
     def files(self, *rows):
         d = tempfile.mkdtemp()
