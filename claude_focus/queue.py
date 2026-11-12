@@ -123,6 +123,18 @@ def hidden_by_wait(state, s):
     return pending_of(state, s) if s["status"] != "waiting" else None
 
 
+def ask_of(state, s):
+    """The question this session queued with `claude-focus ask` (asks.py), or None."""
+    a = (state.get("asks") or {}).get(s["sessionId"])
+    return a if a and a.get("pid") in (None, s["pid"]) else None
+
+
+def overdue(item, now_ms):
+    """A queued question whose waiting costs something by now (--costly-after)."""
+    a = item.get("ask_q")
+    return bool(a and a.get("costly_after") and now_ms >= a["costly_after"])
+
+
 def pending_of(state, s):
     p = state.get("pending", {}).get(s["sessionId"])
     return p if p and p.get("pid") in (None, s["pid"]) else None
@@ -131,7 +143,8 @@ def pending_of(state, s):
 def classify(sessions, state, now, cfg):
     """Returns dict with lists: need, todo, working, pending, free. `need` is
     sorted, highest effective priority first; ties go to the longest wait.
-    `todo` (waits that left the user a task) is sorted oldest first."""
+    `todo` (waits that left the user a task, and queued questions) is sorted
+    oldest first, after the questions whose waiting costs something."""
     out = {"need": [], "todo": [], "working": [], "pending": [], "free": []}
     now_ms = now.timestamp() * 1000
     for s in sessions:
@@ -140,6 +153,21 @@ def classify(sessions, state, now, cfg):
         item = {"s": s, "e": e, "score": e.get("score"), "fresh": fresh_score(e, stamp)}
         # A shell session that waits, has an undelivered wake-up, or asks the
         # user goes where an idle one would; else it works on its shells.
+        # A question queued with claude-focus ask waits for the user under YOUR
+        # TO-DOS, also while the session works on or waits for something else.
+        # An open dialog (waiting) is in NEED YOU already.
+        a = ask_of(state, s)
+        if a and s["status"] != "waiting":
+            item["ask_q"] = a
+            item["needs"] = a["questions"][0]["question"]
+            p = pending_of(state, s)
+            if p:
+                item["pending"], item["wake"] = p, next_event_ms(p, now_ms)
+                item["why"] = p.get("note") or ("waits for a check" if p.get("check") else "waits")
+            item["eff"], item["base"], _ = effective(s, e, now, cfg)
+            item["waited_h"] = max(0.0, (now_ms - a["at"]) / 3.6e6)
+            out["todo"].append(item)
+            continue
         woke = e.get("woke")
         if working(s) and not (s["status"] == "shell" and (
                 hidden_by_wait(state, s) or (woke and not woke.get("delivered") and woke.get("stamp") == stamp)
@@ -218,7 +246,7 @@ def classify(sessions, state, now, cfg):
         item["eff"], item["base"], item["waited_h"] = effective(s, e, now, cfg)
         out["need"].append(item)
     out["need"].sort(key=lambda i: (-i["eff"], -i["waited_h"]))
-    out["todo"].sort(key=lambda i: -i["waited_h"])
+    out["todo"].sort(key=lambda i: (not overdue(i, now_ms), -i["waited_h"]))  # costly questions first
     out["pending"].sort(key=lambda i: i["wake"])
     return out
 

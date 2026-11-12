@@ -49,6 +49,15 @@ class RuleTest(unittest.TestCase):
         self.assertEqual(su.add_rule(added, RULE), (added, False))
         self.assertEqual(su.remove_rule(added), (text, True))
 
+    def test_an_older_block_gets_the_new_rule(self):
+        old, _ = su.add_rule("# Mine\n", "Run `claude-focus pending` when you wait.")
+        new, changed = su.add_rule(old + "\n## Later\n", RULE)
+        self.assertTrue(changed)
+        self.assertIn(RULE.strip(), new)
+        self.assertNotIn("Run `claude-focus pending` when you wait.", new)
+        self.assertTrue(new.startswith("# Mine\n") and new.endswith("\n## Later\n"))
+        self.assertEqual(su.add_rule(new, RULE), (new, False))
+
     def test_an_own_rule_is_kept(self):
         own = "Run `claude-focus pending --until` when you wait.\n"
         self.assertEqual(su.add_rule(own, RULE), (own, False))

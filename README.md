@@ -178,6 +178,7 @@ claude-focus list             # print the queue once
 claude-focus go               # go to the session at the top of the queue
 claude-focus show             # bring the focus screen to the front, or open one
 claude-focus pending ...      # from inside a session: wait for something external
+claude-focus ask ...          # from inside a session: queue a question for you (see "Questions that do not block")
 claude-focus restore          # iTerm2, after a crash: open the sessions of the last iTerm2 run again
 claude-focus reboot           # iTerm2, before a planned restart: save the layout, stop working sessions
 claude-focus search <words>   # past sessions with these words, and the command that resumes each
@@ -434,6 +435,37 @@ Safety rules of the waker:
   service runs), so a wake-up is never typed twice.
 - A check's output is not put into the wake-up message (it can carry text
   from outside, such as an e-mail). `"wake_check_output": true` turns it on.
+
+### Questions that do not block
+
+An open AskUserQuestion dialog blocks its session until you answer: the
+wake-ups of its wait, Monitor events and the results of background tasks
+all wait for you. A session that waits for something and needs your answer
+too can queue the question instead:
+
+```sh
+claude-focus ask --question "Merge MR !412 now?" \
+  --option "Merge now::it passed review" --option "Wait::after the demo" \
+  --default "the MR stays paused" --costly-after "+2h"
+claude-focus ask --json '{"questions": [...]}'     # up to four, as for AskUserQuestion
+claude-focus ask --show | --clear
+```
+
+The question shows under YOUR TO-DOS (`?`, with what the session does
+meanwhile), the session works on or ends its turn, and its wait still wakes
+it. Questions whose `--costly-after` time has passed come first among the
+to-dos, marked "costly since". Enter on one takes you to the session and
+types `[claude-focus ask] … is here for your question q3: "…". Ask it now
+with AskUserQuestion` into its prompt (only an empty one; a working session
+takes it after its step), so the real dialog opens while you are at the
+keyboard; the queued copy is gone then. `d` removes a question you answered
+some other way, and when you type into the session yourself, the prompt hook
+reminds it to run `claude-focus ask --clear` if that was the answer.
+
+A session that sits in an open dialog shows `◆ dialog open` and how long,
+in NEED YOU. `ask_nudge` never reminds a session that has a question queued.
+The rule that setup adds to `~/.claude/CLAUDE.md` says when to use which,
+and setup now replaces an older version of that rule with the current one.
 
 ## CLAUDE.md changes
 

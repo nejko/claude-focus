@@ -85,8 +85,14 @@ def remove_hook(settings):
 
 
 def add_rule(text, rule):
-    """CLAUDE.md text with the rule added at the end, between markers.
-    Returns (text, changed)."""
+    """CLAUDE.md text with the rule added at the end, between markers. A
+    block that an older setup added is replaced with this rule, so a new
+    version's rule (such as claude-focus ask) reaches the sessions; a rule
+    without markers is the user's own copy and stays. Returns (text, changed)."""
+    if MARK_START in text and MARK_END in text:
+        start, end = text.index(MARK_START), text.index(MARK_END) + len(MARK_END)
+        block = f"{MARK_START}\n\n{rule.strip()}\n\n{MARK_END}"
+        return (text, False) if text[start:end] == block else (text[:start] + block + text[end:], True)
     if RULE_TAG in text:
         return text, False
     head = text.rstrip() + "\n\n" if text.strip() else ""

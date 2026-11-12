@@ -1,5 +1,6 @@
 """Entry point. `claude-focus` opens the focus screen; `claude-focus list`
 prints the queue once (it scores sessions that have no fresh score first)."""
+import json
 import os
 import shlex
 import subprocess
@@ -120,6 +121,83 @@ WHEN: HH:MM (next time it comes), +30m, +2h, +1d, or "YYYY-MM-DD HH:MM".
 check never succeeds. The wait ends early when {user} types into the session;
 a background task notification, a message from another session, the answer
 to a question and an idle compaction keep it."""
+
+
+ASK_HELP = """Queue a question for {user} instead of opening the AskUserQuestion dialog now.
+
+An open dialog blocks this session until {user} answers: wake-ups, Monitor
+events and background results wait. A queued question shows under YOUR
+TO-DOS in {user}'s queue; you work on, or end your turn (a pending wait still
+wakes you). When {user} comes to it, claude-focus types into this session
+that they are here, and you ask the question with AskUserQuestion then.
+
+One question:   claude-focus ask --question "Merge MR !412 now?" \\
+                  --option "Merge now::it passed review" --option "Wait::after the demo" \\
+                  --default "the MR stays paused" --costly-after "+2h"
+Up to four:     claude-focus ask --json '{"questions": [<as for AskUserQuestion>]}'
+"""
+
+
+def cmd_ask(argv):
+    import argparse
+    import datetime as dt
+
+    from . import asks
+    from . import pending as pend
+    from . import queue as q
+
+    ap = argparse.ArgumentParser(prog="claude-focus ask", description=store.say(ASK_HELP),
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--question", help="the question, standing alone")
+    ap.add_argument("--header", default="", help="a short label for it (at most 12 characters)")
+    ap.add_argument("--option", action="append", default=[],
+                    help='"label::description", 2 to 4 times, the recommended one first')
+    ap.add_argument("--multi", action="store_true", help="the options are not exclusive")
+    ap.add_argument("--json", help='{"questions": [...]} as for AskUserQuestion, for up to four questions')
+    ap.add_argument("--default", default="", help=store.say("what you do meanwhile, until {user} answers"))
+    ap.add_argument("--costly-after", help="from when waiting costs something (HH:MM, +2h, YYYY-MM-DD HH:MM): "
+                                           "the question then comes first among the to-dos")
+    ap.add_argument("--show", action="store_true", help="print the queued question, for AskUserQuestion")
+    ap.add_argument("--clear", action="store_true", help="remove the queued question")
+    a = ap.parse_args(argv)
+
+    sess = pend.own_session()
+    if not sess:
+        sys.exit("claude-focus ask: run this from inside a Claude Code session.")
+    sid = sess["sessionId"]
+    if a.show or a.clear:
+        rec = asks.clear(sid) if a.clear else asks.get(sid)
+        print(("Question removed." if a.clear else asks.show(rec)) if rec else "No question queued.")
+        return
+    if a.json:
+        try:
+            questions = json.loads(a.json).get("questions")
+        except (ValueError, AttributeError):
+            ap.error("--json: not a JSON object with \"questions\"")
+    elif a.question:
+        questions = [{"question": a.question.strip(), "header": a.header[:12], "multiSelect": a.multi,
+                      "options": [asks.option(o) for o in a.option]}]
+    else:
+        ap.error("give --question with --option, or --json")
+    why = asks.validate(questions)
+    if why:
+        ap.error(why)
+    costly = None
+    if a.costly_after:
+        when = q.parse_when(a.costly_after, dt.datetime.now())
+        if not when:
+            ap.error(f"--costly-after: cannot read a time from {a.costly_after!r}")
+        costly = int(when.timestamp() * 1000)
+    rec = asks.put(sess, questions, a.default.strip(), costly)
+    user = store.user()
+    print(f"Queued {rec['id']}: it shows under YOUR TO-DOS in {user}'s queue"
+          + (", first among them from " + pend.fmt_ms(costly) if costly else "")
+          + ". Work on, or end your turn; a pending wait still wakes you. When "
+          f"{user} comes to it, claude-focus types {asks.PREFIX} into this session: then ask it with "
+          "AskUserQuestion (claude-focus ask --show prints it). Say in your final message that the question "
+          "is queued and what you do meanwhile.")
+    if not pend.app_running():
+        print(f"WARNING: neither the claude-focus service nor a focus screen runs now. Tell {user}.")
 
 
 def cmd_pending(argv):
@@ -453,6 +531,8 @@ def main():
         cmd_show()
     elif args[0] == "pending":
         cmd_pending(args[1:])
+    elif args[0] == "ask":
+        cmd_ask(args[1:])
     elif args[0] == "hook":
         cmd_hook(args[1:])
     elif args[0] == "restore":
@@ -488,6 +568,6 @@ def main():
         setup.uninstall(purge="--purge" in args)
     else:
         print("usage: claude-focus [setup [--yes] [--dry-run] | uninstall [--purge] | list | go | show | "
-              "pending --help | search <words> | index | update | restore [--dry-run] | reboot [--dry-run] | cost | "
+              "pending --help | ask --help | search <words> | index | update | restore [--dry-run] | reboot [--dry-run] | cost | "
               "status | install-daemon | uninstall-daemon | --version]")
         sys.exit(2)

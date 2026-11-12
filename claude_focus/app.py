@@ -16,7 +16,7 @@ import tty as ttymod
 from . import costs, folders, look
 from . import pending as pend
 from . import queue as q
-from . import __version__, history, restore, scorer, sessions as sessions_mod, store, terminal, themes, update, watch
+from . import __version__, asks, history, restore, scorer, sessions as sessions_mod, store, terminal, themes, update, watch
 from .look import B, R, bg, fg, fit, mix, width
 from .screen import EMPTY
 from .terminal import SHELLS
@@ -506,7 +506,7 @@ class App:
             return
         state = store.load_state()
         e = state["sessions"].get(s["key"], {})
-        if q.pending_of(state, s) or e.get("dismissed_stamp") == s["statusSince"] \
+        if q.pending_of(state, s) or q.ask_of(state, s) or e.get("dismissed_stamp") == s["statusSince"] \
                 or time.time() - e.get("nudged_at", 0) < NUDGE_PAUSE_S:
             return
         now = sessions_mod.status_of(s["pid"], s["sessionId"])
@@ -802,6 +802,8 @@ class App:
             return
         s = item["s"]
         pane = self.pane_of(s)
+        if sec == "todo" and item.get("ask_q") and pane:
+            await self.deliver_ask(s, pane, item["ask_q"])
         job = s.get("jobId") or s.get("id")
         if not pane and job:
             # A background session (/bg) has no pane: attach it in a new window (a new herdr tab).
@@ -820,6 +822,19 @@ class App:
         if await self.bridge.go(pane, zoom=self.cfg["zoom"]) and before:
             self.answer_watch = asyncio.ensure_future(
                 self._guard("answer watch", self._return_after_answer(s, pane, *before)))
+
+    async def deliver_ask(self, s, pane, rec):
+        """Enter on a queued question: the user is here, so type that into the
+        session (asks.here_message); it asks with AskUserQuestion now. Into
+        an empty prompt only; a working session takes it after its step.
+        Delivered, the question leaves the queue."""
+        ok, why = await self.bridge.send_prompt(pane, asks.here_message(rec))
+        if not ok:
+            self.flash(f"{s.get('name')}: question {rec['id']} not passed on, {why}. Tell it to ask "
+                       "its queued question (claude-focus ask --show).", 12)
+            return
+        asks.clear(s["sessionId"])
+        store.log(f"ask {rec['id']} passed on to {s.get('name')}")
 
     async def _dialog_snapshot(self, s):
         """(status stamp, id of the last question) of a session that shows a
@@ -1086,6 +1101,12 @@ class App:
         sec, item = self.selected()
         if item and item["s"]["status"] == "waiting":
             self.flash(f"{item['s'].get('name')} asks you a question. Answer it, or snooze it (s).")
+            return
+        if item and item.get("ask_q"):  # answered some other way: the question leaves the queue
+            asks.clear(item["s"]["sessionId"])
+            text = f"{item['s'].get('name')}: question {item['ask_q']['id']} removed (the session is not told)."
+            self.flash(text)
+            store.log("key: " + text)
             return
         if item and item.get("needs"):  # the user did their part; the session still waits
             sid, name = item["s"]["sessionId"], item["s"].get("name")
@@ -1360,10 +1381,24 @@ class App:
             if item.get("woke"):
                 wk = item["woke"]
                 tags.append(f"{alert}{B}WAKE-UP{R}{alert} {wk['reason']}, not sent: {wk['why_not']}{R}")
+            if s["status"] == "waiting":  # an open dialog: the session can do nothing until it is answered
+                tags.append(f"{dim}◆ dialog open {since}{R}")
             if sc.get("deadline"):
                 tags.append(f"{alert}due {sc['deadline']}{R}")
             if sc.get("effort_min") is not None:
                 text += f"{dim}  ~{sc['effort_min']} min{R}"
+        elif sec == "todo" and item.get("ask_q"):  # a question queued with claude-focus ask
+            a = item["ask_q"]
+            lead, age, kind = f"{fg(acc)}?{R}", fmt_wait(item["waited_h"]), "question"
+            more = len(a["questions"]) - 1
+            text = item["needs"] + (f"{dim} (+{more} more){R}" if more else "")
+            if a.get("default"):
+                text += f"{dim}  ·  meanwhile: {a['default']}{R}"
+            if item.get("pending"):
+                text += f"{dim}  ·  it also waits for: {item.get('why', '')}{R}"
+            if a.get("costly_after"):
+                tags.append(f"{alert}{B}costly since {fmt_when(a['costly_after'])}{R}" if q.overdue(item, now_ms)
+                            else f"{dim}costly from {fmt_when(a['costly_after'])}{R}")
         elif sec == "todo":
             lead, age, kind = f"{fg(acc)}☐{R}", fmt_wait(item["waited_h"]), "your task"
             text = item["needs"] + f"{dim}  ·  then it waits for: {item.get('why', '')} "\

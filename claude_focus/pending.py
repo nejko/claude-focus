@@ -160,7 +160,13 @@ def on_prompt(hook):
     prompt = hook.get("prompt") or ""
     if not sid or prompt.lstrip().startswith("[claude-focus "):
         return None  # a wake-up or restore message from claude-focus, not the user
-    if sid not in store.load_state().get("pending", {}):
+    state = store.load_state()
+    if sid not in state.get("pending", {}):
+        ask = (state.get("asks") or {}).get(sid)
+        if ask and not NOT_USER.match(prompt):
+            return (f"[claude-focus] {store.user(cap=True)} typed into this session while your question "
+                    f"{ask['id']} waits in their queue (claude-focus ask). If this answers it, run "
+                    "`claude-focus ask --clear`, so it leaves their queue.")
         return None  # the usual case: one read, no write
     own = own_session()
     own_pid = own["pid"] if own and own.get("sessionId") == sid else None
@@ -192,7 +198,9 @@ def on_prompt(hook):
             "again later (\"when we agree\", \"after this\") is a wait now: set it now, with an "
             "earlier --until if you must also do a step at a set time. Do not run it only when "
             f"you need {user} and wait for nothing external; then end the turn with one concrete "
-            "question to them (AskUserQuestion), so their queue shows what you need. Do not tell "
+            "question to them (AskUserQuestion), so their queue shows what you need. If you wait AND "
+            "need their answer, keep the wait and queue the question with `claude-focus ask`: an open "
+            "dialog would hold up the wake-up until they answer. Do not tell "
             f"{user} that the session still waits unless you ran it again.")
 
 
@@ -209,7 +217,9 @@ def kept_message(p):
             f"this turn. Your claude-focus wait{note} is still set, so when this turn ends, the "
             f"session stays out of {user}'s queue until claude-focus wakes it ({' or '.join(when)}). "
             f"If this event means that you now need {user}, run `claude-focus pending --clear` and end "
-            "the turn with one concrete question to them (AskUserQuestion). If only the wait changed, "
+            "the turn with one concrete question to them (AskUserQuestion); if you still wait for "
+            "something too, keep the wait and queue the question with `claude-focus ask` instead, so "
+            "the wake-up is not held up by an open dialog. If only the wait changed, "
             "run claude-focus pending again with the new values.")
 
 

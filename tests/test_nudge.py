@@ -16,7 +16,8 @@ DECISION = {"kind": "decision", "level": 2, "level_p": 0.7, "ask": "Povej, ali n
 
 class NudgeTest(unittest.TestCase):
     def setUp(self):
-        store.update_state(lambda st: (st.__setitem__("sessions", {}), st.__setitem__("pending", {})))
+        store.update_state(lambda st: (st.__setitem__("sessions", {}), st.__setitem__("pending", {}),
+                                       st.__setitem__("asks", {})))
         self.app = appmod.App(None)
         self.app.cfg = dict(self.app.cfg, ask_nudge=True)
         self.app.bridge = mock.Mock(send_prompt=mock.AsyncMock(return_value=(True, "")),
